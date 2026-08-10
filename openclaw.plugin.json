@@ -1,0 +1,91 @@
+{
+  "id": "trilium",
+  "name": "trilium",
+  "description": "Tools for searching, reading, and editing notes in a TriliumNext instance over ETAPI -- notes, the tree, labels/relations, attachments, revisions, and journal/calendar notes.",
+  "version": "1.1.0",
+  "skills": ["./skills"],
+  "configSchema": {
+    "type": "object",
+    "required": ["baseUrl", "apiToken"],
+    "properties": {
+      "baseUrl": {
+        "type": "string",
+        "format": "uri",
+        "description": "Base URL of the Trilium instance, e.g. https://trilium.example.com (ETAPI lives under /etapi)."
+      },
+      "apiToken": {
+        "type": ["string", "object"],
+        "description": "Trilium ETAPI token (Options -> ETAPI in the Trilium UI), as a plain string or a SecretRef object."
+      },
+      "semanticSearch": {
+        "type": "object",
+        "properties": {
+          "enabled": {
+            "type": "boolean",
+            "description": "Enable the local semantic search index that hybridizes trilium_search_notes' `search` results. Defaults to true; the plugin still fails open to Trilium's own lexical/attribute-only search if the runtime/environment can't support it (e.g. Node <22.5, no node:sqlite) even when this is left enabled."
+          },
+          "indexPath": {
+            "type": "string",
+            "description": "Filesystem path for the plugin-owned SQLite+sqlite-vec index file. Defaults under ~/.openclaw/plugins/trilium/. The file is fully rebuildable from Trilium content, so it never needs its own backup strategy beyond copying this one file."
+          },
+          "embedding": {
+            "type": "object",
+            "properties": {
+              "provider": {
+                "type": "string",
+                "enum": ["openai-compatible", "local"],
+                "description": "Embedding backend to use. Defaults to \"openai-compatible\". \"local\" runs a small ONNX model on-CPU via @myceliumhq/embed, with zero API dependency, but is never chosen automatically -- opt in explicitly if you want note content to never leave the machine."
+              },
+              "baseUrl": {
+                "type": "string",
+                "description": "Base URL of an OpenAI-compatible embeddings endpoint, e.g. \"https://openrouter.ai/api/v1\". Required when provider is \"openai-compatible\" (the default); unused for \"local\"."
+              },
+              "apiKey": {
+                "type": ["string", "object"],
+                "description": "API key for the embedding endpoint, as a plain string or a SecretRef object. Required for semantic search to do anything with the default openai-compatible provider -- note content is sent to that endpoint to embed it. Without this (and no provider: \"local\"), trilium_search_notes silently stays lexical/attribute-only."
+              },
+              "model": {
+                "type": "string",
+                "description": "Embedding model id. Required for the openai-compatible provider (models vary by endpoint, so there's no universal default); optional for \"local\" (defaults to a small bundled ONNX model)."
+              },
+              "dimensions": {
+                "type": "integer",
+                "description": "Embedding vector width, must match what the configured model actually produces. Required for the openai-compatible provider; optional for \"local\" (defaults to 384, matching its default model)."
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "uiHints": {
+    "apiToken": {
+      "sensitive": true,
+      "label": "ETAPI token"
+    }
+  },
+  "contracts": {
+    "tools": [
+      "trilium_search_notes",
+      "trilium_get_note",
+      "trilium_read_note_content",
+      "trilium_create_note",
+      "trilium_update_note",
+      "trilium_delete_note",
+      "trilium_undelete_note",
+      "trilium_get_recent_changes",
+      "trilium_place_note_in_tree",
+      "trilium_remove_note_from_location",
+      "trilium_create_attribute",
+      "trilium_update_attribute",
+      "trilium_delete_attribute",
+      "trilium_create_attachment",
+      "trilium_get_attachment",
+      "trilium_update_attachment",
+      "trilium_delete_attachment",
+      "trilium_create_revision",
+      "trilium_read_revision_content",
+      "trilium_get_calendar_note"
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+# tri
+
+[![CI](https://github.com/myceliumhq/tri/actions/workflows/ci.yml/badge.svg)](https://github.com/myceliumhq/tri/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+
+An agent-facing CLI for [TriliumNext](https://triliumnotes.org/) Notes, talking to its
+[ETAPI](https://docs.triliumnotes.org/user-guide/advanced-usage/etapi) REST API. Search, read,
+write, and lightly organize notes -- covering the same workflows you'd otherwise do by hand in
+Trilium's own UI.
+
+Built for coding agents: token-cheap `--help`, deterministic exit codes, file-path-based
+attachment I/O (bytes never round-trip through an agent's context), no interactive prompts.
+
+An [OpenClaw](https://docs.openclaw.ai) plugin and a standalone [MCP](https://modelcontextprotocol.io)
+server are also included, for hosts without a shell.
+
+## Install
+
+```bash
+npm install --global @myceliumhq/tri
+```
+
+## Configure
+
+```bash
+export TRILIUM_URL=https://trilium.example.com
+export TRILIUM_TOKEN=your-etapi-token  # Options -> ETAPI -> Create new ETAPI token
+tri doctor
+```
+
+## Use
+
+```bash
+tri --help
+tri search "#book #year >= 1950"
+tri note read abc123
+tri note append abc123 --file notes.md
+tri tree root --depth 3
+tri journal today
+tri attach add abc123 ./diagram.png
+```
+
+See `tri <command> --help` for flags on any command, or the bundled skill
+(`skills/trilium/SKILL.md`) for the full command reference and decision guidance.
+
+## Semantic search
+
+`tri search` is lexical/attribute-only (Trilium's own query language). Optional semantic search
+is available as a separate sidecar, [`semanticd`](https://github.com/myceliumhq/semanticd) --
+run it alongside your Trilium instance (using `@myceliumhq/tri/semantic-adapter` as its
+`SEMANTICD_ADAPTER_MODULE`) and it syncs a local vector index you can query directly over HTTP
+(`GET /query?q=...`). `tri search` does not call it automatically yet -- that integration is
+planned but not built.
+
+## Standalone MCP server
+
+The same functionality also runs outside a shell entirely, as an ordinary MCP server (stdio or
+Streamable HTTP), via [`@myceliumhq/mcp`](https://github.com/myceliumhq/toolkit/tree/main/packages/mcp).
+Useful for any MCP client -- Claude Desktop, Claude Code, etc.
+
+Configuration is env vars instead of a config file:
+
+| Env var | Required | Notes |
+| --- | --- | --- |
+| `TRILIUM_URL` | yes | Base URL of the Trilium instance |
+| `TRILIUM_TOKEN` | yes | ETAPI token |
+| `TRILIUM_URL_FILE` / `TRILIUM_TOKEN_FILE` | no | Docker-secret variants: path to a file whose trimmed contents are used instead |
+| `TRILIUM_READ_ONLY` | no | Set to exactly `true` to register only read tools -- write tools aren't registered at all, so they can't be listed or called. Not a substitute for authenticating the HTTP transport |
+| `MCP_TRANSPORT` | no | `stdio` (default) or `http` |
+| `MCP_PORT` | no | Only used with `MCP_TRANSPORT=http`; default `3000` |
+| `MCP_HOST` | no | Only used with `MCP_TRANSPORT=http`; default `127.0.0.1` (loopback-only). Set to `0.0.0.0` only behind an authenticated reverse proxy, and only with `MCP_ALLOWED_HOSTS` set (or startup fails) |
+| `MCP_ALLOWED_HOSTS` | no | Comma-separated hostnames the server accepts in `Host` (DNS-rebinding protection). Required when `MCP_HOST=0.0.0.0` |
+
+```bash
+pnpm run build
+TRILIUM_URL=https://trilium.example.com TRILIUM_TOKEN=your-etapi-token pnpm run start:mcp
+```
+
+A `Dockerfile` is included for building a container image locally.
+
+## OpenClaw plugin
+
+Installed via npm (above), then point OpenClaw at the installed package's directory. Configure it:
+
+```json
+{
+  "plugins": {
+    "entries": {
+      "trilium": {
+        "config": {
+          "baseUrl": "https://trilium.example.com",
+          "apiToken": "your-etapi-token"
+        }
+      }
+    }
+  }
+}
+```
+
+`apiToken` also accepts a [SecretRef](https://docs.openclaw.ai/cli/config) instead of a plain string.
+
+## Development
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for dev setup, regenerating API types, and commit
+conventions.
