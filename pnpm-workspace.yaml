@@ -17,3 +17,16 @@ allowBuilds:
   sharp: true
   sqlite-vec: true
   tree-sitter-bash: true
+
+# pnpm rejects a package published within the last 24h as a supply-chain
+# guard against a just-published malicious version -- these are our own
+# packages, published moments before this repo, so exempted explicitly.
+# Safe to leave in place after they age past 24h (a no-op then, not an
+# error); only needs updating if a *new* version is depended on within a
+# day of its own publish.
+minimumReleaseAgeExclude:
+  - '@myceliumhq/dev-config@0.1.0'
+  - '@myceliumhq/embed@0.1.0'
+  - '@myceliumhq/index@0.1.0'
+  - '@myceliumhq/mcp@0.1.0'
+  - '@myceliumhq/toolkit@0.1.0'
