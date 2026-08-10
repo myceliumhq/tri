@@ -1,5 +1,13 @@
 # AGENTS.md
 
+## Using this CLI
+
+No install needed for one-off use: `npx @myceliumhq/tri <command>`. Needs `TRILIUM_URL` and
+`TRILIUM_TOKEN` set (an ETAPI token from Trilium's Options -> ETAPI). Read
+`skills/trilium/SKILL.md` first for the command reference and decision guidance instead of
+discovering it via `--help` alone -- it also covers safety rules (never write without being
+asked, never guess between multiple matches).
+
 @README.md has what this package does and how end users configure it.
 @CONTRIBUTING.md has full dev setup, the commit convention, and the release process — read it before committing or touching CI.
 
