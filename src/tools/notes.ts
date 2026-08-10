@@ -1,5 +1,5 @@
-import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { type Static, Type } from "typebox";
+import type { AnyAgentTool } from "../agent-tool.js";
 import type { TriliumClient, TriliumClientHandle } from "../client.js";
 import { noteUrl, toToolResult, unwrap } from "../client.js";
 import type { SemanticSearchHandle } from "../semantic/handle.js";
@@ -23,8 +23,8 @@ function clampLimit(limit: number | undefined, fallback: number): number {
 
 // -- Semantic search integration seam --
 //
-// Mirrors @transmitt0r/openclaw-plugin-paperless-ngx's src/tools/documents.ts
-// seam comment: a plugin-owned semantic/embeddings index lives in
+// Mirrors ppl's (github.com/myceliumhq/ppl) src/tools/documents.ts seam
+// comment: a package-owned semantic/embeddings index lives in
 // src/semantic/, populated and queried over Trilium's own ETAPI content
 // (note content leaves the machine to be embedded -- see the README).
 // trilium_search_notes is hybrid (Trilium's own lexical+attribute search,

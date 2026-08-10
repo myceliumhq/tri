@@ -1,5 +1,5 @@
-import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { type Static, Type } from "typebox";
+import type { AnyAgentTool } from "../agent-tool.js";
 import type { TriliumClientHandle } from "../client.js";
 import { toToolResult, unwrap } from "../client.js";
 import { contentStatusFor, htmlToMarkdown, normalizeLineEndings, readRange } from "./html.js";
@@ -7,54 +7,20 @@ import { contentStatusFor, htmlToMarkdown, normalizeLineEndings, readRange } fro
 // Attachments have no dedicated "list by note" endpoint search of their
 // own within this file -- use trilium_get_note's include_attachments flag
 // to list a note's attachments (GET /notes/{noteId}/attachments), and
-// these tools once you have (or are creating) a specific attachmentId.
+// these tools once you have a specific attachmentId.
+//
+// Deliberately no create/update-attachment tools here: both would need a
+// `content` param carrying arbitrary bytes as a JSON string, which has no
+// safe encoding for real binary content (an image, a PDF) over MCP -- a
+// model inlining raw bytes as text corrupts them, and there's no base64
+// encode/decode step to make that safe. That's exactly the gap the `tri`
+// CLI's `attach add <noteId> <file>` exists to close: a file path in,
+// bytes read straight from disk, never round-tripped through a model's
+// context at all. Use the CLI for attaching/replacing content; this file
+// only keeps the read/delete tools, which have no such encoding problem.
 
-const createAttachmentParams = Type.Object({
-  owner_id: Type.String({
-    description: "The owning note's id (or a revisionId, for a revision's own attachment).",
-  }),
-  title: Type.String({ description: "Attachment title/filename." }),
-  mime: Type.String({ description: "MIME type, e.g. 'image/png', 'application/pdf'." }),
-  content: Type.Optional(Type.String({ description: "Attachment content." })),
-  role: Type.Optional(
-    Type.String({
-      description: "Attachment role, e.g. 'file', 'image' -- how Trilium's UI treats it.",
-    }),
-  ),
-  position: Type.Optional(
-    Type.Integer({ description: "Display order among this owner's attachments." }),
-  ),
-});
-
-export function createCreateAttachmentTool(
-  handlePromise: Promise<TriliumClientHandle>,
-): AnyAgentTool {
-  return {
-    name: "trilium_create_attachment",
-    label: "Create a Trilium attachment",
-    description:
-      "Create an attachment owned by a note (or revision). Attachments are for supplementary files " +
-      "that belong to a note without being notes themselves (e.g. an inline image). Save the returned " +
-      "attachmentId -- there's no way to list attachments back except via trilium_get_note's " +
-      "include_attachments on the owning note.",
-    parameters: createAttachmentParams,
-    execute: async (_toolCallId, params: Static<typeof createAttachmentParams>) => {
-      const { client } = await handlePromise;
-      const result = unwrap(
-        await client.POST("/attachments", {
-          body: {
-            ownerId: params.owner_id,
-            title: params.title,
-            mime: params.mime,
-            content: params.content ?? "",
-            role: params.role,
-            position: params.position,
-          },
-        }),
-      );
-      return toToolResult(result);
-    },
-  };
+function isTextSafeMime(mime: string): boolean {
+  return mime.startsWith("text/") || mime === "application/json" || mime === "application/xml";
 }
 
 const getAttachmentParams = Type.Object({
@@ -62,7 +28,10 @@ const getAttachmentParams = Type.Object({
   include_content: Type.Optional(
     Type.Boolean({
       description:
-        "Also fetch and include the attachment's content (bounded, see start_line/end_line). Defaults to false.",
+        "Also fetch and include the attachment's content (bounded, see start_line/end_line). Only " +
+        "safe for text-ish mime types (text/*, application/json, application/xml) -- rejected for " +
+        "anything else, since reading binary content as text would corrupt it; use the `tri` CLI's " +
+        "`attach get --out` to download binary content to a file instead. Defaults to false.",
     }),
   ),
   start_line: Type.Optional(
@@ -89,7 +58,9 @@ export function createGetAttachmentTool(handlePromise: Promise<TriliumClientHand
     label: "Get a Trilium attachment",
     description:
       "Fetch an attachment's metadata (title, mime, role, contentLength) by id, optionally including " +
-      "its content (bounded like trilium_read_note_content).",
+      "its content for text-ish mime types (bounded like trilium_read_note_content). For binary " +
+      "content (images, PDFs, ...), use the `tri` CLI's `attach get --out` instead -- there is no " +
+      "safe way to carry binary bytes through this tool.",
     parameters: getAttachmentParams,
     execute: async (_toolCallId, params: Static<typeof getAttachmentParams>) => {
       const { client } = await handlePromise;
@@ -99,6 +70,15 @@ export function createGetAttachmentTool(handlePromise: Promise<TriliumClientHand
         }),
       );
       if (!params.include_content) return toToolResult(attachment);
+
+      const mime = attachment.mime ?? "";
+      if (!isTextSafeMime(mime)) {
+        throw new Error(
+          `trilium_get_attachment: include_content isn't supported for mime '${mime}' -- ` +
+            "reading binary content as text would corrupt it. Use the tri CLI's " +
+            "'attach get <id> --out <path>' to download it instead.",
+        );
+      }
 
       const rawContent = unwrap(
         await client.GET("/attachments/{attachmentId}/content", {
@@ -120,91 +100,6 @@ export function createGetAttachmentTool(handlePromise: Promise<TriliumClientHand
         params.end_line,
       );
       return toToolResult({ ...attachment, ...range, content_status: contentStatusFor(content) });
-    },
-  };
-}
-
-const updateAttachmentParams = Type.Object({
-  attachment_id: Type.String({ description: "Attachment id to update." }),
-  title: Type.Optional(Type.String({ description: "New title." })),
-  mime: Type.Optional(Type.String({ description: "New MIME type." })),
-  role: Type.Optional(Type.String({ description: "New role." })),
-  position: Type.Optional(Type.Integer({ description: "New display order." })),
-  content: Type.Optional(
-    Type.String({
-      description:
-        "Full replacement content, if given -- written verbatim, with no auto-HTML-wrapping (unlike " +
-        "trilium_update_note's content). Attachments are arbitrary mime-typed blobs, not guaranteed " +
-        "CKEditor-authored HTML the way a `text`-type note's content is, so there's no safe default " +
-        "assumption to auto-format against.",
-    }),
-  ),
-});
-
-export function createUpdateAttachmentTool(
-  handlePromise: Promise<TriliumClientHandle>,
-): AnyAgentTool {
-  return {
-    name: "trilium_update_attachment",
-    label: "Update a Trilium attachment",
-    description:
-      "Update an attachment's title/mime/role/position and/or replace its full content in one call " +
-      "(content is a full replacement, same as trilium_update_note).",
-    parameters: updateAttachmentParams,
-    execute: async (_toolCallId, params: Static<typeof updateAttachmentParams>) => {
-      const { client } = await handlePromise;
-      const hasMetadataChanges =
-        params.title !== undefined ||
-        params.mime !== undefined ||
-        params.role !== undefined ||
-        params.position !== undefined;
-
-      let attachment: Record<string, unknown> | undefined;
-      if (hasMetadataChanges) {
-        attachment = unwrap(
-          await client.PATCH("/attachments/{attachmentId}", {
-            params: { path: { attachmentId: params.attachment_id } },
-            body: {
-              title: params.title,
-              mime: params.mime,
-              role: params.role,
-              position: params.position,
-            },
-          }),
-        );
-      }
-
-      if (params.content !== undefined) {
-        // See notes.ts's identical unwrap() usage on its content PUT -- a
-        // failed write must throw here rather than silently falling through
-        // to the re-fetch below and reporting stale content as success.
-        // Written verbatim (no formatContentForWrite) -- see
-        // updateAttachmentParams' content doc comment for why.
-        unwrap(
-          await client.PUT("/attachments/{attachmentId}/content", {
-            params: { path: { attachmentId: params.attachment_id } },
-            headers: { "Content-Type": "text/plain" },
-            body: params.content,
-            bodySerializer: (body: unknown) => body as string,
-          }),
-        );
-        attachment = unwrap(
-          await client.GET("/attachments/{attachmentId}", {
-            params: { path: { attachmentId: params.attachment_id } },
-          }),
-        );
-      } else if (attachment === undefined) {
-        // No metadata change and no content write -- the only thing left to
-        // do is report current state, so this is the sole fetch (unlike the
-        // content-write branch above, nothing here is discarded unread).
-        attachment = unwrap(
-          await client.GET("/attachments/{attachmentId}", {
-            params: { path: { attachmentId: params.attachment_id } },
-          }),
-        );
-      }
-
-      return toToolResult(attachment);
     },
   };
 }

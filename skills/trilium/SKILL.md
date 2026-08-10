@@ -61,7 +61,5 @@ error.
 
 ## No shell available?
 
-The same functionality is also exposed as OpenClaw agent tools (`trilium_search_notes`,
-`trilium_get_note`, `trilium_read_note_content`, `trilium_create_note`, `trilium_update_note`,
-`trilium_get_calendar_note`, `trilium_create_attachment`, `trilium_create_attribute`, etc.) and as
-a standalone MCP server -- see the package README for both.
+The same functionality is also exposed as a standalone MCP server -- see the package README for
+setup and its (narrower) tool list.

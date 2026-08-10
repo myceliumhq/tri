@@ -1,5 +1,5 @@
-import type { AnyAgentTool } from "openclaw/plugin-sdk/plugin-entry";
 import { type Static, Type } from "typebox";
+import type { AnyAgentTool } from "../agent-tool.js";
 import type { TriliumClient, TriliumClientHandle } from "../client.js";
 import { noteUrl, toToolResult, unwrap } from "../client.js";
 

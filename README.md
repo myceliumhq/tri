@@ -11,33 +11,32 @@ Trilium's own UI.
 Built for coding agents: token-cheap `--help`, deterministic exit codes, file-path-based
 attachment I/O (bytes never round-trip through an agent's context), no interactive prompts.
 
-An [OpenClaw](https://docs.openclaw.ai) plugin and a standalone [MCP](https://modelcontextprotocol.io)
-server are also included, for hosts without a shell.
+A standalone [MCP](https://modelcontextprotocol.io) server is also included, for hosts without a
+shell.
 
-## Install
+## Use
 
-```bash
-npm install --global @myceliumhq/tri
-```
-
-## Configure
+No install step needed -- `npx` fetches and caches it on first run:
 
 ```bash
 export TRILIUM_URL=https://trilium.example.com
 export TRILIUM_TOKEN=your-etapi-token  # Options -> ETAPI -> Create new ETAPI token
-tri doctor
+
+npx @myceliumhq/tri doctor
+npx @myceliumhq/tri search "#book #year >= 1950"
+npx @myceliumhq/tri note read abc123
+npx @myceliumhq/tri note append abc123 --file notes.md
+npx @myceliumhq/tri tree root --depth 3
+npx @myceliumhq/tri journal today
+npx @myceliumhq/tri attach add abc123 ./diagram.png
 ```
 
-## Use
+Prefer a global install to skip `npx`'s resolve step on every call (or if you're scripting many
+invocations in a loop):
 
 ```bash
-tri --help
-tri search "#book #year >= 1950"
-tri note read abc123
-tri note append abc123 --file notes.md
-tri tree root --depth 3
-tri journal today
-tri attach add abc123 ./diagram.png
+npm install --global @myceliumhq/tri
+tri doctor
 ```
 
 See `tri <command> --help` for flags on any command, or the bundled skill
@@ -77,27 +76,6 @@ TRILIUM_URL=https://trilium.example.com TRILIUM_TOKEN=your-etapi-token pnpm run 
 ```
 
 A `Dockerfile` is included for building a container image locally.
-
-## OpenClaw plugin
-
-Installed via npm (above), then point OpenClaw at the installed package's directory. Configure it:
-
-```json
-{
-  "plugins": {
-    "entries": {
-      "trilium": {
-        "config": {
-          "baseUrl": "https://trilium.example.com",
-          "apiToken": "your-etapi-token"
-        }
-      }
-    }
-  }
-}
-```
-
-`apiToken` also accepts a [SecretRef](https://docs.openclaw.ai/cli/config) instead of a plain string.
 
 ## Development
 

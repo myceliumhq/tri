@@ -2,11 +2,8 @@ import type { SourceAdapter } from "@myceliumhq/index";
 import { createTriliumClient } from "./client.js";
 import { createTriliumSourceAdapter } from "./semantic/source-adapter.js";
 
-// Public, OpenClaw-agnostic entrypoint for external hosts (a generic
-// semanticd sidecar) that want to sync this source without depending on
-// the OpenClaw plugin registration in ./index.ts (which pulls in
-// openclaw's plugin-sdk types). Mirrors this app's own semantic/handle.ts
-// comment: no import here reaches into openclaw.
+// Public entrypoint for external hosts (a generic semanticd sidecar) that
+// want to sync this source.
 export { createTriliumClient, type TriliumClient, type TriliumClientConfig } from "./client.js";
 export { createTriliumSourceAdapter } from "./semantic/source-adapter.js";
 

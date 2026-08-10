@@ -8,15 +8,15 @@ import {
   serveHttp,
   serveStdio,
 } from "@myceliumhq/mcp";
+import type { AnyAgentTool } from "./agent-tool.js";
 import { createTriliumClient, type TriliumClientHandle } from "./client.js";
 import { isLoopbackHost, readStandaloneConfig, readTransportConfig } from "./mcp-server-config.js";
-import { createSemanticSearchCore, type Logger } from "./semantic/handle.js";
 import {
-  createCreateAttachmentTool,
-  createDeleteAttachmentTool,
-  createGetAttachmentTool,
-  createUpdateAttachmentTool,
-} from "./tools/attachments.js";
+  createSemanticSearchCore,
+  type Logger,
+  type SemanticSearchHandle,
+} from "./semantic/handle.js";
+import { createDeleteAttachmentTool, createGetAttachmentTool } from "./tools/attachments.js";
 import {
   createCreateAttributeTool,
   createDeleteAttributeTool,
@@ -60,6 +60,43 @@ function defaultIndexPath(): string {
   return path.join(os.homedir(), ".mycelium", "trilium", "semantic-index.db");
 }
 
+// The complete MCP tool surface -- extracted from main() so a test can
+// import it (with stub handles) and assert against it without triggering
+// main()'s process-level side effects (env parsing, listening, signal
+// handlers). Also the drift-detection source of truth for
+// tools/read-only.ts's classification: every name here must be classified
+// as either read-only or write, and vice versa (see read-only.test.ts).
+//
+// Deliberately narrower than the full tool set implemented under
+// src/tools/ -- no create/update-attachment tools (see attachments.ts's
+// own comment: no safe way to carry binary content through an MCP result).
+// Attaching/replacing a file's content is CLI-only (`tri attach add`).
+export function createAllTools(
+  handlePromise: Promise<TriliumClientHandle>,
+  semanticHandlePromise: Promise<SemanticSearchHandle>,
+): AnyAgentTool[] {
+  return [
+    createSearchNotesTool(handlePromise, semanticHandlePromise),
+    createGetNoteTool(handlePromise),
+    createReadNoteContentTool(handlePromise),
+    createCreateNoteTool(handlePromise),
+    createUpdateNoteTool(handlePromise),
+    createDeleteNoteTool(handlePromise),
+    createUndeleteNoteTool(handlePromise),
+    createGetRecentChangesTool(handlePromise),
+    createPlaceNoteInTreeTool(handlePromise),
+    createRemoveNoteFromLocationTool(handlePromise),
+    createCreateAttributeTool(handlePromise),
+    createUpdateAttributeTool(handlePromise),
+    createDeleteAttributeTool(handlePromise),
+    createGetAttachmentTool(handlePromise),
+    createDeleteAttachmentTool(handlePromise),
+    createCreateRevisionTool(handlePromise),
+    createReadRevisionContentTool(handlePromise),
+    createGetCalendarNoteTool(handlePromise),
+  ];
+}
+
 async function main(): Promise<void> {
   const logger = stderrLogger();
   const config = readStandaloneConfig(process.env);
@@ -75,8 +112,7 @@ async function main(): Promise<void> {
     {
       config: config.semanticSearch,
       logger,
-      // No SecretRef concept exists outside OpenClaw's config system -- an
-      // env var is already either a plain string or nothing.
+      // An env var is already either a plain string or nothing.
       resolveApiKey: async (value) =>
         typeof value === "string" && value.length > 0 ? value : undefined,
       defaultIndexPath,
@@ -85,28 +121,7 @@ async function main(): Promise<void> {
     handlePromise,
   );
 
-  const allTools = [
-    createSearchNotesTool(handlePromise, semanticHandlePromise),
-    createGetNoteTool(handlePromise),
-    createReadNoteContentTool(handlePromise),
-    createCreateNoteTool(handlePromise),
-    createUpdateNoteTool(handlePromise),
-    createDeleteNoteTool(handlePromise),
-    createUndeleteNoteTool(handlePromise),
-    createGetRecentChangesTool(handlePromise),
-    createPlaceNoteInTreeTool(handlePromise),
-    createRemoveNoteFromLocationTool(handlePromise),
-    createCreateAttributeTool(handlePromise),
-    createUpdateAttributeTool(handlePromise),
-    createDeleteAttributeTool(handlePromise),
-    createCreateAttachmentTool(handlePromise),
-    createGetAttachmentTool(handlePromise),
-    createUpdateAttachmentTool(handlePromise),
-    createDeleteAttachmentTool(handlePromise),
-    createCreateRevisionTool(handlePromise),
-    createReadRevisionContentTool(handlePromise),
-    createGetCalendarNoteTool(handlePromise),
-  ];
+  const allTools = createAllTools(handlePromise, semanticHandlePromise);
 
   // TRILIUM_READ_ONLY=true is a hard trim, not a soft flag: the write tools are
   // never handed to createMcpServer, so they never show up in tools/list and
@@ -173,7 +188,13 @@ async function main(): Promise<void> {
   process.on("SIGTERM", () => void shutdown("SIGTERM"));
 }
 
-main().catch((err) => {
-  console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
-  process.exit(1);
-});
+// Only run main() when this file is executed directly (node dist/mcp-server.js),
+// not when imported for its createAllTools export -- e.g. read-only.test.ts
+// imports this module to get the real tool list without wanting to boot a
+// server or parse env vars as a side effect.
+if (import.meta.url === `file://${process.argv[1]}`) {
+  main().catch((err) => {
+    console.error(err instanceof Error ? (err.stack ?? err.message) : String(err));
+    process.exit(1);
+  });
+}

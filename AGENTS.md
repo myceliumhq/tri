@@ -1,6 +1,6 @@
 # AGENTS.md
 
-@README.md has what this plugin does and how end users configure it.
+@README.md has what this package does and how end users configure it.
 @CONTRIBUTING.md has full dev setup, the commit convention, and the release process — read it before committing or touching CI.
 
 ## Layout
@@ -9,31 +9,23 @@
   `commands/*.ts` onto `@myceliumhq/toolkit`'s `createProgram`/`runProgram`; `etapi.ts` maps ETAPI
   errors to this toolkit's exit-code contract (404→3, 401/403→4); `config.ts` resolves
   `TRILIUM_URL`/`TRILIUM_TOKEN` lazily so `--help` never requires them set.
-- `src/index.ts` — OpenClaw plugin entrypoint, registers tools with OpenClaw
+- `src/agent-tool.ts` — the `AnyAgentTool` shape tool factories type their return value against
 - `src/tools/` — one file per tool group (notes, tree, attributes, attachments, revisions, calendar, html)
 - `src/tools/html.ts` — shared HTML<->plain-text conversion and bounded line-range reading, used by every content-reading/writing tool
 - `src/client.ts` — typed Trilium ETAPI client
 - `src/generated/trilium-schema.d.ts` — generated, do not hand-edit (see CONTRIBUTING.md)
 - `src/semantic/` — wires `@myceliumhq/embed` (pluggable embedding provider) and `@myceliumhq/index`
-  (the actual store/sync/search engine) together for this plugin; `source-adapter.ts` is the only
-  trilium-specific piece (implements `@myceliumhq/index`'s `SourceAdapter`), and `query.ts` strips
-  Trilium's query-language operators out of a `search` string before anything gets embedded. Don't
+  (the actual store/sync/search engine) together; `source-adapter.ts` is the only trilium-specific
+  piece (implements `@myceliumhq/index`'s `SourceAdapter`), and `query.ts` strips Trilium's
+  query-language operators out of a `search` string before anything gets embedded. Don't
   reintroduce a local sqlite-vec/embedding-provider implementation here — that duplication is
   exactly what got extracted into the [toolkit](https://github.com/myceliumhq/toolkit) packages
   (`@myceliumhq/embed`, `@myceliumhq/index`).
-- `src/semantic/handle.ts` (`createSemanticSearchCore`) has **zero `openclaw` imports, not even type
-  imports** — verified by `pnpm run build` then `grep -rln 'from "openclaw' dist/` (should only ever
-  print `dist/index.js` and `dist/semantic/handle-openclaw.js`). `src/semantic/handle-openclaw.ts` is
-  the thin adapter translating `OpenClawPluginApi` into `handle.ts`'s host-agnostic
-  `SemanticSearchHostDeps`; `index.ts` imports the adapter, `src/mcp-server.ts` imports `handle.ts`
-  directly. If you add an `api.*` read to make semantic search do something new, it goes in
-  `handle-openclaw.ts`, never in `handle.ts` — that's what keeps `openclaw` out of the standalone
-  server's dependency tree (see `peerDependenciesMeta.openclaw.optional` in `package.json`).
 - `src/mcp-server.ts` — standalone MCP server entrypoint on `@myceliumhq/mcp` (stdio/HTTP), configured
-  via env vars instead of `openclaw.json` (see README's "Standalone MCP server" section). Tool
-  factories (`src/tools/*.ts`) are reused unmodified from the OpenClaw plugin path — they were never
-  OpenClaw-coupled to begin with. `src/mcp-server-config.ts` holds the (tested) env-var parsing.
-- `skills/` — OpenClaw agent skills bundled with the plugin
+  via env vars (see README's "Standalone MCP server" section); `createAllTools` there is
+  deliberately narrower than the full set implemented under `src/tools/` (see its own doc comment).
+  `src/mcp-server-config.ts` holds the (tested) env-var parsing.
+- `skills/` — agent skills bundled with the package
 - `*.test.ts` — colocated with the source they test
 
 ## Working in this repo

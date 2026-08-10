@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createTriliumClient } from "../client.js";
-import {
-  createCreateAttachmentTool,
-  createDeleteAttachmentTool,
-  createGetAttachmentTool,
-  createUpdateAttachmentTool,
-} from "./attachments.js";
+import { createDeleteAttachmentTool, createGetAttachmentTool } from "./attachments.js";
 
 const BASE_URL = "https://trilium.example.com";
 
@@ -48,29 +43,6 @@ function setup(routes: Route[]) {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-});
-
-describe("trilium_create_attachment", () => {
-  it("writes content verbatim, with no auto-HTML-wrapping", async () => {
-    let postBody: unknown;
-    const handle = setup([
-      {
-        test: (p, m) => p === "/etapi/attachments" && m === "POST",
-        handle: async (req) => {
-          postBody = await req.json();
-          return jsonResponse({ attachmentId: "att1" }, 201);
-        },
-      },
-    ]);
-    const tool = createCreateAttachmentTool(handle);
-    await tool.execute("call1", {
-      owner_id: "note1",
-      title: "file.txt",
-      mime: "text/plain",
-      content: "hello world",
-    });
-    expect((postBody as { content: string }).content).toBe("hello world");
-  });
 });
 
 describe("trilium_get_attachment", () => {
@@ -116,77 +88,39 @@ describe("trilium_get_attachment", () => {
     };
     expect(result.content).toBe(rawContent);
   });
-});
 
-describe("trilium_update_attachment", () => {
-  it("writes content verbatim (no formatContentForWrite -- see attachments.ts's own doc comment)", async () => {
-    let putBody: string | undefined;
+  // Binary content has no safe way to travel through an MCP tool result as
+  // a JSON string -- include_content must refuse rather than silently
+  // returning corrupted bytes reinterpreted as UTF-8 text.
+  it("refuses include_content for a binary mime instead of returning corrupted text", async () => {
     const handle = setup([
       {
-        test: (p, m) => p === "/etapi/attachments/att1/content" && m === "PUT",
-        handle: async (req) => {
-          putBody = await req.text();
-          return new Response(null, { status: 204 });
-        },
-      },
-      {
         test: (p, m) => p === "/etapi/attachments/att1" && m === "GET",
-        handle: () => jsonResponse({ attachmentId: "att1" }),
+        handle: () => jsonResponse({ attachmentId: "att1", title: "photo.png", mime: "image/png" }),
       },
     ]);
-    const tool = createUpdateAttachmentTool(handle);
-    await tool.execute("call1", { attachment_id: "att1", content: "plain text, not wrapped" });
-    expect(putBody).toBe("plain text, not wrapped");
+    const tool = createGetAttachmentTool(handle);
+    await expect(
+      tool.execute("call1", { attachment_id: "att1", include_content: true }),
+    ).rejects.toThrow(/image\/png/);
   });
 
-  // Regression test for a real bug found in review: the content PUT's
-  // result was discarded, so a failed write fell through to a re-fetch
-  // and reported stale content as success. With no metadata fields given,
-  // a content-only update no longer does a pre-write GET at all (see the
-  // next test) -- so this asserts zero GETs happened, not one.
-  it("throws instead of silently returning stale content when the content PUT fails", async () => {
-    let getCount = 0;
+  it("allows include_content for a non-HTML text-ish mime like application/json", async () => {
     const handle = setup([
       {
-        test: (p, m) => p === "/etapi/attachments/att1/content" && m === "PUT",
-        handle: () => errorResponse(400, "VALIDATION_ERROR", "bad content"),
+        test: (p, m) => p === "/etapi/attachments/att1" && m === "GET",
+        handle: () =>
+          jsonResponse({ attachmentId: "att1", title: "data.json", mime: "application/json" }),
       },
       {
-        test: (p, m) => p === "/etapi/attachments/att1" && m === "GET",
-        handle: () => {
-          getCount += 1;
-          return jsonResponse({ attachmentId: "att1" });
-        },
+        test: (p, m) => p === "/etapi/attachments/att1/content" && m === "GET",
+        handle: () => textResponse('{"a":1}'),
       },
     ]);
-    const tool = createUpdateAttachmentTool(handle);
-    await expect(tool.execute("call1", { attachment_id: "att1", content: "x" })).rejects.toThrow(
-      /VALIDATION_ERROR/,
-    );
-    expect(getCount).toBe(0);
-  });
-
-  // Regression test for a real perf issue found in review: a content-only
-  // update used to do a pre-write GET whose result was immediately
-  // discarded, then a second GET after the PUT -- 3 calls where 2 suffice.
-  it("does a content-only update in exactly one GET (no wasted pre-write fetch)", async () => {
-    let getCount = 0;
-    const handle = setup([
-      {
-        test: (p, m) => p === "/etapi/attachments/att1/content" && m === "PUT",
-        handle: () => new Response(null, { status: 204 }),
-      },
-      {
-        test: (p, m) => p === "/etapi/attachments/att1" && m === "GET",
-        handle: () => {
-          getCount += 1;
-          return jsonResponse({ attachmentId: "att1" });
-        },
-      },
-    ]);
-    const tool = createUpdateAttachmentTool(handle);
-    await tool.execute("call1", { attachment_id: "att1", content: "hello" });
-    expect(getCount).toBe(1);
+    const tool = createGetAttachmentTool(handle);
+    const result = (await tool.execute("call1", { attachment_id: "att1", include_content: true }))
+      .details as { content: string };
+    expect(result.content).toBe('{"a":1}');
   });
 });
 
