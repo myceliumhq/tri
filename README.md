@@ -45,11 +45,22 @@ See `tri <command> --help` for flags on any command, or the bundled skill
 ## Semantic search
 
 `tri search` is lexical/attribute-only (Trilium's own query language). Optional semantic search
-is available as a separate sidecar, [`semanticd`](https://github.com/myceliumhq/semanticd) --
-run it alongside your Trilium instance (using `@myceliumhq/tri/semantic-adapter` as its
-`SEMANTICD_ADAPTER_MODULE`) and it syncs a local vector index you can query directly over HTTP
-(`GET /query?q=...`). `tri search` does not call it automatically yet -- that integration is
-planned but not built.
+is available as a separate sidecar, `tri-semanticd` -- this package's own binary, built on
+[`@myceliumhq/semanticd`](https://github.com/myceliumhq/semanticd) with this repo's Trilium
+adapter wired in directly. Run it alongside your Trilium instance and it syncs a local vector
+index you can query directly over HTTP (`GET /query?q=...`):
+
+```bash
+export TRILIUM_URL=https://trilium.example.com
+export TRILIUM_TOKEN=your-etapi-token
+export EMBEDDING_PROVIDER=local   # zero-API-key CPU model; or openai-compatible, see semanticd's README
+
+npx -p @myceliumhq/tri tri-semanticd
+```
+
+Or as a container: `ghcr.io/myceliumhq/tri-semanticd:<version>` (built from `Dockerfile.semanticd`,
+published on every tagged release). `tri search` does not call it automatically yet -- that
+integration is planned but not built.
 
 ## Standalone MCP server
 
@@ -75,7 +86,8 @@ pnpm run build
 TRILIUM_URL=https://trilium.example.com TRILIUM_TOKEN=your-etapi-token pnpm run start:mcp
 ```
 
-A `Dockerfile` is included for building a container image locally.
+A `Dockerfile` is included for building a container image locally (`Dockerfile.semanticd` for the
+semantic search sidecar above).
 
 ## Development
 

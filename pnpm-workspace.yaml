@@ -1,22 +1,17 @@
 packages:
   - "."
 
-# @google/genai, protobufjs, tree-sitter-bash come from the `openclaw`
-# peerDependency's own dependency tree (resolved locally for typechecking
-# via autoInstallPeers, even though this package never imports openclaw at
-# runtime -- see AGENTS.md). esbuild is pulled in via vitest. sqlite-vec
-# ships a platform-specific native binary for @myceliumhq/index's vector
-# store; onnxruntime-node/sharp are @huggingface/transformers' native deps
-# for @myceliumhq/embed's optional local embedding provider.
+# esbuild is pulled in via vitest. sqlite-vec ships a platform-specific
+# native binary for @myceliumhq/index's vector store; onnxruntime-node/
+# sharp/protobufjs are @huggingface/transformers' (and its onnxruntime
+# dependency's) native deps for @myceliumhq/embed's optional local
+# embedding provider.
 allowBuilds:
-  "@google/genai": true
   esbuild: true
   onnxruntime-node: true
-  openclaw: true
   protobufjs: true
   sharp: true
   sqlite-vec: true
-  tree-sitter-bash: true
 
 # pnpm rejects a package published within the last 24h as a supply-chain
 # guard against a just-published malicious version -- these are our own
@@ -30,3 +25,4 @@ minimumReleaseAgeExclude:
   - '@myceliumhq/index@0.1.0'
   - '@myceliumhq/mcp@0.1.0'
   - '@myceliumhq/toolkit@0.1.0'
+  - '@myceliumhq/semanticd@1.0.0'

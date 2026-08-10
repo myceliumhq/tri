@@ -33,6 +33,10 @@ asked, never guess between multiple matches).
   via env vars (see README's "Standalone MCP server" section); `createAllTools` there is
   deliberately narrower than the full set implemented under `src/tools/` (see its own doc comment).
   `src/mcp-server-config.ts` holds the (tested) env-var parsing.
+- `src/semanticd-bin.ts` — the `tri-semanticd` binary: passes `semantic-adapter.ts`'s
+  `createAdapter()` straight into `@myceliumhq/semanticd`'s `runSemanticd()`. `Dockerfile.semanticd`
+  builds a container image from it, published by `.github/workflows/docker-semanticd.yml` on every
+  tagged release.
 - `skills/` — agent skills bundled with the package
 - `*.test.ts` — colocated with the source they test
 

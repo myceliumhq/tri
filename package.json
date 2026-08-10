@@ -31,7 +31,8 @@
     }
   },
   "bin": {
-    "tri": "./dist/cli/index.js"
+    "tri": "./dist/cli/index.js",
+    "tri-semanticd": "./dist/semanticd-bin.js"
   },
   "files": [
     "dist",
@@ -45,6 +46,7 @@
     "lint:fix": "biome check --write .",
     "test": "vitest run",
     "start:mcp": "node dist/mcp-server.js",
+    "start:semanticd": "node dist/semanticd-bin.js",
     "prepublishOnly": "pnpm run build && pnpm run test"
   },
   "dependencies": {
@@ -52,6 +54,7 @@
     "@myceliumhq/embed": "^0.1.0",
     "@myceliumhq/index": "^0.1.0",
     "@myceliumhq/mcp": "^0.1.0",
+    "@myceliumhq/semanticd": "^1.0.0",
     "marked": "^18.0.7",
     "node-html-markdown": "^2.0.0",
     "openapi-fetch": "^0.17.0",

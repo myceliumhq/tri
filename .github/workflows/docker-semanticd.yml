@@ -1,0 +1,15 @@
+name: Docker Publish (semanticd)
+
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  publish:
+    permissions:
+      contents: read
+      packages: write
+    uses: myceliumhq/.github/.github/workflows/docker-publish.yml@main
+    with:
+      image: tri-semanticd
+      dockerfile: Dockerfile.semanticd
