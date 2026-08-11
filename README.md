@@ -59,8 +59,9 @@ npx -p @myceliumhq/tri tri-semanticd
 ```
 
 Or as a container: `ghcr.io/myceliumhq/tri-semanticd:<version>` (built from `Dockerfile.semanticd`,
-published on every tagged release). `tri search` does not call it automatically yet -- that
-integration is planned but not built.
+published on every tagged release). The standalone MCP server below queries a deployed sidecar
+automatically once pointed at it; `tri search` does not call it yet -- that integration is planned
+but not built.
 
 ## Standalone MCP server
 
@@ -76,6 +77,8 @@ Configuration is env vars instead of a config file:
 | `TRILIUM_TOKEN` | yes | ETAPI token |
 | `TRILIUM_URL_FILE` / `TRILIUM_TOKEN_FILE` | no | Docker-secret variants: path to a file whose trimmed contents are used instead |
 | `TRILIUM_READ_ONLY` | no | Set to exactly `true` to register only read tools -- write tools aren't registered at all, so they can't be listed or called. Not a substitute for authenticating the HTTP transport |
+| `TRILIUM_SEMANTICD_URL` | no | Base URL of a deployed `tri-semanticd` sidecar (see "Semantic search" above). Unset falls back to lexical/attribute-only search |
+| `TRILIUM_SEMANTIC_SEARCH_ENABLED` | no | Set to exactly `false` to skip semantic search even if `TRILIUM_SEMANTICD_URL` is set |
 | `MCP_TRANSPORT` | no | `stdio` (default) or `http` |
 | `MCP_PORT` | no | Only used with `MCP_TRANSPORT=http`; default `3000` |
 | `MCP_HOST` | no | Only used with `MCP_TRANSPORT=http`; default `127.0.0.1` (loopback-only). Set to `0.0.0.0` only behind an authenticated reverse proxy, and only with `MCP_ALLOWED_HOSTS` set (or startup fails) |

@@ -22,13 +22,15 @@ asked, never guess between multiple matches).
 - `src/tools/html.ts` — shared HTML<->plain-text conversion and bounded line-range reading, used by every content-reading/writing tool
 - `src/client.ts` — typed Trilium ETAPI client
 - `src/generated/trilium-schema.d.ts` — generated, do not hand-edit (see CONTRIBUTING.md)
-- `src/semantic/` — wires `@myceliumhq/embed` (pluggable embedding provider) and `@myceliumhq/index`
-  (the actual store/sync/search engine) together; `source-adapter.ts` is the only trilium-specific
-  piece (implements `@myceliumhq/index`'s `SourceAdapter`), and `query.ts` strips Trilium's
-  query-language operators out of a `search` string before anything gets embedded. Don't
-  reintroduce a local sqlite-vec/embedding-provider implementation here — that duplication is
-  exactly what got extracted into the [toolkit](https://github.com/myceliumhq/toolkit) packages
-  (`@myceliumhq/embed`, `@myceliumhq/index`).
+- `src/semantic/` — `handle.ts` is a thin client of a deployed `tri-semanticd` sidecar (via
+  `@myceliumhq/semanticd`'s `createSemanticdClient`), not a local embedding/index engine -- this
+  package holds no vector store of its own. `source-adapter.ts` is the trilium-specific piece the
+  sidecar actually syncs against (implements `@myceliumhq/index`'s `SourceAdapter`, consumed via
+  `semantic-adapter.ts`/`semanticd-bin.ts`, not by `handle.ts`). `query.ts` strips Trilium's
+  query-language operators out of a `search` string before sending the free-text remainder to the
+  sidecar. Don't reintroduce a local sqlite-vec/embedding-provider implementation in `handle.ts` --
+  running that logic twice (once here, once in the sidecar) is exactly the duplication
+  `tri-semanticd` exists to eliminate.
 - `src/mcp-server.ts` — standalone MCP server entrypoint on `@myceliumhq/mcp` (stdio/HTTP), configured
   via env vars (see README's "Standalone MCP server" section); `createAllTools` there is
   deliberately narrower than the full set implemented under `src/tools/` (see its own doc comment).

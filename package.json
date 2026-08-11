@@ -51,7 +51,6 @@
   },
   "dependencies": {
     "@myceliumhq/toolkit": "^0.1.0",
-    "@myceliumhq/embed": "^0.1.0",
     "@myceliumhq/index": "^0.1.0",
     "@myceliumhq/mcp": "^0.1.0",
     "@myceliumhq/semanticd": "^1.0.0",

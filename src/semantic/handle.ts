@@ -1,51 +1,14 @@
-import {
-  createEmbeddingProvider,
-  type EmbeddingProvider,
-  type EmbeddingProviderConfig,
-} from "@myceliumhq/embed";
-import {
-  DEFAULT_SEMANTIC_INDEX_CONFIG,
-  openSemanticIndex,
-  type SemanticIndex,
-} from "@myceliumhq/index";
-import type { TriliumClientHandle } from "../client.js";
+import { createSemanticdClient } from "@myceliumhq/semanticd";
 import { extractFreeTextTerms } from "./query.js";
-import { createTriliumSourceAdapter } from "./source-adapter.js";
 import type { SemanticMatch } from "./types.js";
-
-// Host-agnostic: `resolveApiKey` is the plain-string identity function in
-// practice (../mcp-server.ts's only caller, reading from an env var). The
-// `apiKey?: unknown` field below is kept untyped-as-string on purpose, so a
-// future host with its own secret-reference concept can plug in here
-// without a breaking type change.
-
-// How often a background incremental sync pass runs. Not part of
-// @myceliumhq/index's own config surface -- it doesn't manage scheduling
-// itself, the host does.
-const SYNC_INTERVAL_MS = 15 * 60_000;
-
-export type SemanticSearchEmbeddingConfig = {
-  // "local" is opt-in only -- never the silent default. A prior in-process
-  // local-inference attempt (node-llama-cpp, in this plugin's sibling
-  // paperless-ngx) was OOM-killed in production on a memory-constrained
-  // host; see AGENTS.md.
-  provider?: "openai-compatible" | "local";
-  // Required for provider "openai-compatible" (any OpenAI-compatible
-  // /v1/embeddings endpoint -- OpenAI, OpenRouter, Ollama, vLLM, LM
-  // Studio, ...). Unused for "local".
-  baseUrl?: string;
-  // A plain string in practice -- typed `unknown` so a future host with
-  // its own secret-reference concept can still plug in without a breaking
-  // type change.
-  apiKey?: unknown;
-  model?: string;
-  dimensions?: number;
-};
 
 export type SemanticSearchPluginConfig = {
   enabled?: boolean;
-  indexPath?: string;
-  embedding?: SemanticSearchEmbeddingConfig;
+  // Base URL of a semanticd sidecar (its own SEMANTICD_PORT, typically
+  // reached at the sidecar's compose/container hostname) running
+  // @myceliumhq/tri/semantic-adapter (e.g. the tri-semanticd binary/image
+  // this package ships) against the same Trilium instance.
+  semanticdUrl?: string;
 };
 
 export type Logger = {
@@ -55,11 +18,10 @@ export type Logger = {
 };
 
 export type SemanticSearchHandle = {
-  // False whenever the semantic backend couldn't come up for any reason
-  // (disabled by config, embedding not fully configured, Node runtime
-  // without node:sqlite, sqlite-vec failed to load, ...). `search` still
-  // exists and is always safe to call -- it just always resolves to `[]`,
-  // which is exactly the pre-existing stub behavior
+  // False whenever semantic search isn't configured/reachable (disabled by
+  // config, no semanticdUrl given, the sidecar unreachable, ...). `search`
+  // still exists and is always safe to call -- it just always resolves to
+  // `[]`, which is exactly the pre-existing stub behavior
   // trilium_search_notes already tolerates.
   available: boolean;
   search: (rawSearch: string | undefined, limit: number) => Promise<SemanticMatch[]>;
@@ -74,163 +36,57 @@ function unavailableHandle(): SemanticSearchHandle {
   };
 }
 
-// Everything the setup logic below needs from whatever is hosting it.
 export type SemanticSearchHostDeps = {
   config: SemanticSearchPluginConfig | undefined;
-  // Resolves whatever `embedding.apiKey` actually is to a plain string (or
-  // undefined if it can't be). ../mcp-server.ts just hands the value back
-  // when it's already a string -- an env var has no secret-reference
-  // concept to resolve.
-  resolveApiKey: (value: unknown) => Promise<string | undefined>;
   logger: Logger;
-  defaultIndexPath: () => string;
-  registerCleanup: (cleanup: () => void | Promise<void>) => void;
 };
 
-// Resolves the configured embedding provider, or undefined (with a warning
-// already logged) if there isn't enough config to build one -- never
-// throws, since a missing/incomplete embedding config is exactly the
-// "stay lexical/attribute-only" case, not a setup failure.
-async function resolveEmbeddingProvider(
-  deps: SemanticSearchHostDeps,
-  raw: SemanticSearchEmbeddingConfig | undefined,
-): Promise<EmbeddingProvider | undefined> {
-  const provider = raw?.provider ?? "openai-compatible";
-
-  if (provider === "local") {
-    return createEmbeddingProvider({
-      provider: "local",
-      model: raw?.model,
-      dimensions: raw?.dimensions,
-    });
-  }
-
-  const apiKey = await deps.resolveApiKey(raw?.apiKey);
-  if (!apiKey || !raw?.baseUrl || !raw?.model || !raw?.dimensions) {
-    deps.logger.warn(
-      "semantic search: embedding.baseUrl/apiKey/model/dimensions must all be configured for " +
-        'the "openai-compatible" provider (or set embedding.provider to "local"), falling back ' +
-        "to lexical/attribute-only search",
-    );
-    return undefined;
-  }
-
-  const config: EmbeddingProviderConfig = {
-    provider: "openai-compatible",
-    baseUrl: raw.baseUrl,
-    apiKey,
-    model: raw.model,
-    dimensions: raw.dimensions,
-  };
-  return createEmbeddingProvider(config);
-}
-
-// The host-agnostic setup logic: resolves an embedding provider, opens the
-// index, wires up periodic sync. Never throws -- resolves to an
-// unavailable handle on any failure so a caller can fail open to
-// lexical/attribute-only search.
-export function createSemanticSearchCore(
-  deps: SemanticSearchHostDeps,
-  clientHandlePromise: Promise<TriliumClientHandle>,
-): Promise<SemanticSearchHandle> {
+// Wires this host to a semanticd sidecar over HTTP -- never throws, always
+// resolves to an unavailable handle if semantic search isn't configured,
+// so a caller can fail open to lexical/attribute-only search.
+export function createSemanticSearchCore(deps: SemanticSearchHostDeps): SemanticSearchHandle {
   if (deps.config?.enabled === false) {
-    return Promise.resolve(unavailableHandle());
+    return unavailableHandle();
   }
 
-  return setup(deps, clientHandlePromise).catch((err) => {
+  const semanticdUrl = deps.config?.semanticdUrl;
+  if (!semanticdUrl) {
     deps.logger.warn(
-      `semantic search: setup failed, falling back to lexical/attribute-only search: ${describe(err)}`,
-    );
-    return unavailableHandle();
-  });
-}
-
-async function setup(
-  deps: SemanticSearchHostDeps,
-  clientHandlePromise: Promise<TriliumClientHandle>,
-): Promise<SemanticSearchHandle> {
-  const embeddingProvider = await resolveEmbeddingProvider(deps, deps.config?.embedding);
-  if (!embeddingProvider) return unavailableHandle();
-
-  const result = await openSemanticIndex({
-    embeddingProvider,
-    dbPath: deps.config?.indexPath ?? deps.defaultIndexPath(),
-    ...DEFAULT_SEMANTIC_INDEX_CONFIG,
-  });
-  if (!result.available) {
-    deps.logger.warn(
-      `semantic search: index unavailable, falling back to lexical/attribute-only search: ${result.reason}`,
+      "semantic search: TRILIUM_SEMANTICD_URL not set, falling back to lexical/attribute-only search",
     );
     return unavailableHandle();
   }
 
-  return setupWithOpenIndex(result.index, clientHandlePromise, deps);
-}
-
-function setupWithOpenIndex(
-  index: SemanticIndex,
-  clientHandlePromise: Promise<TriliumClientHandle>,
-  deps: SemanticSearchHostDeps,
-): SemanticSearchHandle {
-  const adapter = createTriliumSourceAdapter(clientHandlePromise.then((h) => h.client));
-  const { logger } = deps;
-
-  let syncInFlight = false;
-  const runSyncPass = async () => {
-    if (syncInFlight) return;
-    syncInFlight = true;
-    try {
-      const summary = await index.sync(adapter, logger);
-      logger.info?.(
-        `semantic search: sync pass complete (processed=${summary.processed}, ` +
-          `skipped=${summary.skippedUnchanged}, failed=${summary.failed})`,
-      );
-    } catch (err) {
-      logger.warn(`semantic search: sync pass failed: ${describe(err)}`);
-    } finally {
-      syncInFlight = false;
-    }
-  };
-
-  // Kick off an initial pass in the background rather than blocking tool
-  // registration on a full backfill -- the first search after startup may
-  // simply find nothing semantic yet, which is no worse than the
-  // lexical/attribute-only behavior this replaces.
-  void runSyncPass();
-
-  const interval = setInterval(() => void runSyncPass(), SYNC_INTERVAL_MS);
-  interval.unref?.();
-
-  let disposed = false;
-  const dispose = async () => {
-    if (disposed) return;
-    disposed = true;
-    clearInterval(interval);
-    index.close();
-  };
-
-  deps.registerCleanup(dispose);
+  const client = createSemanticdClient(semanticdUrl);
 
   return {
     available: true,
     // Trilium mixes plain fulltext tokens and structured `#label`/
     // `~relation`/`note.property` operators in the same `search` string --
     // extractFreeTextTerms pulls the free-text portion back out before
-    // embedding anything (a pure structured-filter query has nothing to
-    // embed, same no-op @myceliumhq/index's own searchSemantic already
-    // applies to an empty term).
+    // querying semanticd (a pure structured-filter query has nothing to
+    // embed, same no-op the sidecar's own search already applies to an
+    // empty term).
     search: async (rawSearch, limit) => {
       const searchTerm = rawSearch ? extractFreeTextTerms(rawSearch) : "";
-      const matches = await index.search(searchTerm, limit, logger);
-      return matches.map((match) => ({
-        noteId: match.sourceId,
-        snippet: match.snippet,
-        score: match.score,
-        startLine: match.startLine,
-        endLine: match.endLine,
-      }));
+      if (!searchTerm) return [];
+      try {
+        const matches = await client.query(searchTerm, limit);
+        return matches.map((match) => ({
+          noteId: match.sourceId,
+          snippet: match.snippet,
+          score: match.score,
+          startLine: match.startLine,
+          endLine: match.endLine,
+        }));
+      } catch (err) {
+        deps.logger.warn(
+          `semantic search: query against semanticd failed, falling back to lexical/attribute-only search: ${describe(err)}`,
+        );
+        return [];
+      }
     },
-    dispose,
+    dispose: async () => {},
   };
 }
 

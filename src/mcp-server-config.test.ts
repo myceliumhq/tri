@@ -42,52 +42,22 @@ describe("readStandaloneConfig", () => {
     expect(config.semanticSearch).toEqual({ enabled: false });
   });
 
-  it("builds a full embedding config from TRILIUM_EMBEDDING_* vars, parsing dimensions as a number", () => {
+  it("builds semanticSearch from TRILIUM_SEMANTICD_URL", () => {
     const config = readStandaloneConfig({
       TRILIUM_BASE_URL: "https://trilium.example.com",
       TRILIUM_API_TOKEN: "t",
-      TRILIUM_EMBEDDING_BASE_URL: "https://openrouter.ai/api/v1",
-      TRILIUM_EMBEDDING_API_KEY: "key",
-      TRILIUM_EMBEDDING_MODEL: "text-embedding-3-small",
-      TRILIUM_EMBEDDING_DIMENSIONS: "1536",
+      TRILIUM_SEMANTICD_URL: "http://tri-semanticd:4499",
     });
-    expect(config.semanticSearch).toEqual({
-      indexPath: undefined,
-      embedding: {
-        provider: undefined,
-        baseUrl: "https://openrouter.ai/api/v1",
-        apiKey: "key",
-        model: "text-embedding-3-small",
-        dimensions: 1536,
-      },
-    });
+    expect(config.semanticSearch).toEqual({ semanticdUrl: "http://tri-semanticd:4499" });
   });
 
-  it("passes provider: local through only when explicitly set to a recognized value", () => {
+  it("leaves semanticSearch undefined when TRILIUM_SEMANTICD_URL is unset even if enabled isn't false", () => {
     const config = readStandaloneConfig({
       TRILIUM_BASE_URL: "https://trilium.example.com",
       TRILIUM_API_TOKEN: "t",
-      TRILIUM_EMBEDDING_PROVIDER: "local",
+      TRILIUM_SEMANTIC_SEARCH_ENABLED: "true",
     });
-    expect(config.semanticSearch?.embedding?.provider).toBe("local");
-  });
-
-  it("ignores an unrecognized TRILIUM_EMBEDDING_PROVIDER value", () => {
-    const config = readStandaloneConfig({
-      TRILIUM_BASE_URL: "https://trilium.example.com",
-      TRILIUM_API_TOKEN: "t",
-      TRILIUM_EMBEDDING_PROVIDER: "gemini",
-    });
-    expect(config.semanticSearch?.embedding?.provider).toBeUndefined();
-  });
-
-  it("carries indexPath through even with no embedding config set", () => {
-    const config = readStandaloneConfig({
-      TRILIUM_BASE_URL: "https://trilium.example.com",
-      TRILIUM_API_TOKEN: "t",
-      TRILIUM_SEMANTIC_INDEX_PATH: "/data/index.db",
-    });
-    expect(config.semanticSearch).toEqual({ indexPath: "/data/index.db", embedding: undefined });
+    expect(config.semanticSearch).toBeUndefined();
   });
 
   describe("<VAR>_FILE Docker secrets", () => {
@@ -191,26 +161,6 @@ describe("readStandaloneConfig", () => {
       TRILIUM_SEMANTIC_SEARCH_ENABLED: "",
     });
     expect(config.semanticSearch).toBeUndefined();
-  });
-
-  it("rejects a non-integer TRILIUM_EMBEDDING_DIMENSIONS instead of producing NaN", () => {
-    expect(() =>
-      readStandaloneConfig({
-        TRILIUM_BASE_URL: "https://trilium.example.com",
-        TRILIUM_API_TOKEN: "t",
-        TRILIUM_EMBEDDING_DIMENSIONS: "abc",
-      }),
-    ).toThrow('TRILIUM_EMBEDDING_DIMENSIONS must be a positive integer (got "abc")');
-  });
-
-  it("rejects non-decimal TRILIUM_EMBEDDING_DIMENSIONS (hex/exponential)", () => {
-    expect(() =>
-      readStandaloneConfig({
-        TRILIUM_BASE_URL: "https://trilium.example.com",
-        TRILIUM_API_TOKEN: "t",
-        TRILIUM_EMBEDDING_DIMENSIONS: "1e3",
-      }),
-    ).toThrow('TRILIUM_EMBEDDING_DIMENSIONS must be a positive integer (got "1e3")');
   });
 });
 
