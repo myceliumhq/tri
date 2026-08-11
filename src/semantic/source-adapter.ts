@@ -90,6 +90,48 @@ export function createTriliumSourceAdapter(
         cursor = newest;
       }
     },
+    // Deletion backstop for @myceliumhq/index's reconcile() -- Trilium's
+    // ETAPI has no delete webhook/event feed (confirmed against its own
+    // generated spec: no webhooks defined), so a deleted note just stops
+    // appearing in listChanged with no tombstone. This sweeps every live
+    // indexable note id via the same cursor-paging scheme as listChanged
+    // (no `since`, so it walks the whole note set) for reconcile() to diff
+    // against what's stored.
+    async *listAllIds() {
+      const client = await clientPromise;
+      let cursor: string | undefined;
+
+      while (true) {
+        const search = cursor
+          ? `note.utcDateModified >= "${cursor}" AND (${INDEXABLE_TYPES_FILTER})`
+          : INDEXABLE_TYPES_FILTER;
+        const result = unwrap(
+          await client.GET("/notes", {
+            params: {
+              query: {
+                search,
+                orderBy: "utcDateModified",
+                orderDirection: "asc",
+                limit: PAGE_SIZE,
+              },
+            },
+          }),
+        );
+
+        const rows = result.results.filter(
+          (note): note is typeof note & { noteId: string; utcDateModified: string } =>
+            typeof note.noteId === "string" && typeof note.utcDateModified === "string",
+        );
+        if (rows.length === 0) return;
+
+        for (const row of rows) yield row.noteId;
+
+        const newest = rows.at(-1)?.utcDateModified;
+        if (rows.length < PAGE_SIZE || newest === cursor) return;
+        cursor = newest;
+      }
+    },
+
     async fetchContent(id) {
       const client = await clientPromise;
       // unwrap() returns undefined for a successful-but-empty body (e.g. an

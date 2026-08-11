@@ -153,6 +153,28 @@ describe("createTriliumSourceAdapter", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
+  it("listAllIds yields every indexable note id, paging by the same advancing cursor as listChanged", async () => {
+    const firstPage = Array.from({ length: PAGE_SIZE }, (_, i) =>
+      fixture(`note${i}`, `blob${i}`, `2026-01-01 00:00:${String(i).padStart(2, "0")}.000Z`),
+    );
+    const secondPage = [fixture("noteLast", "blobLast", "2026-01-02 00:00:00.000Z")];
+    let call = 0;
+    const notesRoute: Route = {
+      test: (p, m) => p === "/etapi/notes" && m === "GET",
+      handle: () => {
+        call += 1;
+        return { results: call === 1 ? firstPage : secondPage };
+      },
+    };
+    const fetchMock = stubFetch([notesRoute]);
+    const sourceAdapter = adapter();
+    const ids = await collect(sourceAdapter.listAllIds?.() ?? (async function* () {})());
+
+    expect(ids).toHaveLength(PAGE_SIZE + 1);
+    expect(ids.at(-1)).toBe("noteLast");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it("fetchContent converts a text note's HTML to markdown using the type cached by listChanged", async () => {
     const notesRoute: Route = {
       test: (p, m) => p === "/etapi/notes" && m === "GET",
