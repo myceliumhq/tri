@@ -31,6 +31,16 @@ error.
   for JSONL instead of a table.
 - `search` never returns full content -- read a specific note with `note read` to see why it
   matched.
+- Semantic search has no reliable "zero results" signal on its own -- it's nearest-neighbor
+  cosine similarity, which always returns *something*, and a nonsense query can score within a
+  few hundredths of a genuinely relevant one against the same index. Don't treat the score as a
+  confidence measure. With `--json`, each row has `match_source` (`lexical`/`semantic`/`both`);
+  if every result is `semantic` (no lexical hits at all), that's the real "this probably found
+  nothing" signal, and `search` also prints a stderr warning in that case.
+- `note read` on an empty-looking result is ambiguous by itself -- a genuinely empty note and a
+  container/folder note (no content of its own, only children) both print nothing and exit `0`.
+  `note read` already disambiguates this on stderr (it has `note get`'s metadata in hand anyway),
+  so check stderr rather than assuming empty stdout means "nothing here."
 - Content for `text`-type notes is Markdown, always, both ways: write Markdown to `note write`/
   `note append`, and `note read` converts the stored HTML back to Markdown. Never hand-author HTML
   for ordinary prose. `code`-type notes are raw source, byte-for-byte, no conversion.
@@ -44,7 +54,10 @@ error.
 1. `tri search "<query>"` -- usually sufficient alone.
 2. Add filters only from constraints the user actually gave: `#labelName` for a known tag,
    `note.type = "code"` for a note type, a date comparison for a time range.
-3. Zero results -> broaden: synonyms, partial words, drop filters one at a time.
+3. No real hits -> broaden: synonyms, partial words, drop filters one at a time. With semantic
+   fusion on, don't rely on an empty result list for this -- check whether results are all
+   `match_source: "semantic"` (or watch for the stderr warning), since fusion rarely returns a
+   truly empty list even for a query that matches nothing.
 4. Present compactly: title, `url` (as a link, always).
 5. Multiple plausible matches -> list for the user to pick, never guess.
 6. Need a note's tree context -> `tri tree <id>` rather than chasing raw ids by hand.
@@ -54,6 +67,11 @@ error.
 - Never create, edit, or delete a note, attribute, or attachment unless the user explicitly asked
   for that action -- this skill is search/retrieval-first, since everyone's own filing and tagging
   conventions differ too much for a one-size-fits-all write skill.
+- Exception: `tri journal` is get-**or-create** by design -- calling it creates today's (or the
+  given date's) journal note if it doesn't exist yet. That's an intended, expected side effect for
+  "what's in today's journal"-style requests, not something to avoid. But don't reach for it on a
+  pure "just search/look something up" request where the user never asked about the journal --
+  use `search` instead so a lookup doesn't quietly create a note.
 - Never guess when multiple matches are plausible -- present options.
 - Never fabricate or assume a note's existence or content.
 - `note write` replaces a note's entire content -- read it first if you need to preserve part of

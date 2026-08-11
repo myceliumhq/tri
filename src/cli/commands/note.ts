@@ -1,4 +1,10 @@
-import { addSubcommand, type Command, writeJson, writeStdout } from "@myceliumhq/toolkit";
+import {
+  addSubcommand,
+  type Command,
+  writeJson,
+  writeStderr,
+  writeStdout,
+} from "@myceliumhq/toolkit";
 import { formatContentForWrite, htmlToMarkdown, normalizeLineEndings } from "../../tools/html.js";
 import { resolveClientHandle } from "../config.js";
 import { readContentInput } from "../content-input.js";
@@ -68,7 +74,10 @@ export function registerNote(program: Command): void {
     .summary("Note content to stdout, as markdown.")
     .description(
       "Note content to stdout, converted to markdown for text notes (code notes print as-is). " +
-        "Pipe-clean: only content goes to stdout, everything else to stderr.",
+        "Pipe-clean: only content goes to stdout, everything else to stderr. Empty output is " +
+        "ambiguous by itself (a genuinely empty note looks identical to a container/folder note " +
+        "that only organizes children) -- when content comes back empty and the note has children, " +
+        "a stderr note says so, since `note get` was already fetched for this call anyway.",
     )
     .addHelpText("after", "\nExample: tri note read abc123 > note.md")
     .action(async (noteId: string) => {
@@ -84,7 +93,24 @@ export function registerNote(program: Command): void {
       ]);
 
       const content = meta.type === "text" ? htmlToMarkdown(raw) : raw;
-      writeStdout(normalizeLineEndings(content));
+      const normalized = normalizeLineEndings(content);
+
+      // Disambiguate "genuinely empty" from "container note with no
+      // content of its own" -- both would otherwise print nothing and
+      // exit 0 identically, and `meta` (with childNoteIds) is already in
+      // hand from the request above, so this costs nothing extra.
+      if (normalized.trim().length === 0) {
+        const childCount = meta.childNoteIds?.length ?? 0;
+        writeStderr(
+          childCount > 0
+            ? `# this note has no content of its own but has ${childCount} child note(s) -- ` +
+                "likely a container/folder note, not truly empty. Use `tri tree` or `note get` " +
+                "to see its structure."
+            : "# this note has no content and no children -- it is genuinely empty.",
+        );
+      }
+
+      writeStdout(normalized);
     });
 
   addSubcommand(note, "write <noteId>")

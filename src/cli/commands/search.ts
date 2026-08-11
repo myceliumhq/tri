@@ -4,6 +4,7 @@ import {
   type Command,
   parseBoundedInt,
   writeJsonLines,
+  writeStderr,
   writeTable,
   writeTruncationNotice,
 } from "@myceliumhq/toolkit";
@@ -24,6 +25,14 @@ type Row = {
   content_snippet?: string;
   content_snippet_start_line?: number;
   content_snippet_end_line?: number;
+  // Only set when semantic fusion actually ran. "semantic" (no lexical hit
+  // at all) is the real no-match proxy an agent should key on -- semantic
+  // similarity scores are NOT a calibrated confidence measure (live-tested:
+  // a nonsense query and a genuinely relevant one can score within ~0.05 of
+  // each other against the same index), so don't threshold on the score
+  // itself, only on whether a lexical hit backs it up.
+  match_source?: "lexical" | "semantic" | "both";
+  semantic_score?: number;
 };
 
 // Fuses lexical rank order with semantic rank order via Reciprocal Rank
@@ -70,7 +79,9 @@ export function registerSearch(program: Command): void {
         "note.property comparisons. See Trilium's search syntax docs for the full grammar. When " +
         "TRILIUM_SEMANTICD_URL is set (a deployed tri-semanticd sidecar), results are fused with a " +
         "semantic search pass automatically -- no separate mode to pick, same as the MCP server's " +
-        "trilium_search_notes.",
+        "trilium_search_notes. --json rows then include match_source (lexical/semantic/both); " +
+        "semantic-only results with no lexical backing print a stderr warning (semantic similarity " +
+        "scores are not a calibrated relevance measure).",
     )
     .option("--limit <n>", `Max results, capped at ${MAX_LIMIT}.`, String(DEFAULT_LIMIT))
     .option("--json", "Emit JSONL (one result per line) instead of a table.")
@@ -115,6 +126,12 @@ export function registerSearch(program: Command): void {
 
       let finalIds: string[];
       let truncated: boolean;
+      // Populated only on a successful semantic pass -- used below to tag
+      // each row's match_source/semantic_score, and to warn when every
+      // result is semantic-only (see the no-lexical-hits check after rows
+      // are built).
+      let semanticIds: string[] = [];
+      const semanticScoreById = new Map<string, number>();
 
       if (useSemantic) {
         try {
@@ -136,7 +153,10 @@ export function registerSearch(program: Command): void {
           // batch "get many notes by id" endpoint, so this is N
           // individual GETs, bounded by how many semantic-only misses
           // there are. Fetched concurrently, no ordering dependency.
-          const semanticIds = semanticMatches.map((match) => String(match.sourceId));
+          semanticIds = semanticMatches.map((match) => String(match.sourceId));
+          for (const match of semanticMatches) {
+            semanticScoreById.set(String(match.sourceId), match.score);
+          }
           const missingIds = semanticIds.filter((id) => !rowById.has(id));
           await Promise.all(
             missingIds.map(async (noteId) => {
@@ -183,9 +203,37 @@ export function registerSearch(program: Command): void {
         finalIds = lexicalIds.slice(0, limit);
       }
 
+      const lexicalIdSet = new Set(lexicalIds);
+      const semanticIdSet = new Set(semanticIds);
       const rows = finalIds
         .map((id) => rowById.get(id))
-        .filter((row): row is Row => row !== undefined);
+        .filter((row): row is Row => row !== undefined)
+        .map((row) => {
+          if (!useSemantic) return row;
+          const inLexical = lexicalIdSet.has(row.noteId);
+          const inSemantic = semanticIdSet.has(row.noteId);
+          return {
+            ...row,
+            match_source: inLexical && inSemantic ? "both" : inLexical ? "lexical" : "semantic",
+            ...(semanticScoreById.has(row.noteId)
+              ? { semantic_score: semanticScoreById.get(row.noteId) }
+              : {}),
+          } as Row;
+        });
+
+      // The real no-match signal: fusion still returns nearest-neighbor
+      // semantic hits for nonsense queries (cosine similarity has no
+      // reliable "nothing matches" floor -- verified against the live
+      // index), so zero lexical hits is what actually means "this query
+      // found nothing," not an empty result list.
+      if (useSemantic && lexicalIds.length === 0 && rows.length > 0) {
+        const bestScore = Math.max(...rows.map((r) => r.semantic_score ?? 0));
+        writeStderr(
+          `# no lexical matches for this query -- ${rows.length} semantic-only result(s) shown ` +
+            `(best score ${bestScore.toFixed(3)}). Semantic similarity is not a calibrated ` +
+            "relevance score; verify these are actually relevant before relying on them.",
+        );
+      }
 
       if (options.json) {
         writeJsonLines(rows);
