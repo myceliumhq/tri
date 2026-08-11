@@ -9,6 +9,10 @@ description: "Search, read, and lightly organize the user's Trilium notes with t
 `TRILIUM_URL`/`TRILIUM_TOKEN` env vars -- run `tri doctor` first if a command fails with a config
 error.
 
+Run `tri` directly if it's on PATH (`command -v tri`). Only if it isn't, fall back to
+`npx @myceliumhq/tri` -- substitute that prefix for `tri` in every command below, otherwise
+identical.
+
 ## Commands
 
 | Command | Use it for |

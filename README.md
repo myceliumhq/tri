@@ -16,28 +16,26 @@ shell.
 
 ## Use
 
-No install step needed -- `npx` fetches and caches it on first run:
-
-```bash
-export TRILIUM_URL=https://trilium.example.com
-export TRILIUM_TOKEN=your-etapi-token  # Options -> ETAPI -> Create new ETAPI token
-
-npx @myceliumhq/tri doctor
-npx @myceliumhq/tri search "#book #year >= 1950"
-npx @myceliumhq/tri note read abc123
-npx @myceliumhq/tri note append abc123 --file notes.md
-npx @myceliumhq/tri tree root --depth 3
-npx @myceliumhq/tri journal today
-npx @myceliumhq/tri attach add abc123 ./diagram.png
-```
-
-Prefer a global install to skip `npx`'s resolve step on every call (or if you're scripting many
-invocations in a loop):
+Install globally so `tri` is a plain command on PATH -- the resolve/download-check `npx` does on
+every single call adds up fast across an agent's many small invocations:
 
 ```bash
 npm install --global @myceliumhq/tri
+
+export TRILIUM_URL=https://trilium.example.com
+export TRILIUM_TOKEN=your-etapi-token  # Options -> ETAPI -> Create new ETAPI token
+
 tri doctor
+tri search "#book #year >= 1950"
+tri note read abc123
+tri note append abc123 --file notes.md
+tri tree root --depth 3
+tri journal today
+tri attach add abc123 ./diagram.png
 ```
+
+No install available? Fall back to `npx @myceliumhq/tri <command>` (fetches and caches on first
+run, same commands otherwise) -- but prefer the global install whenever you can, per above.
 
 See `tri <command> --help` for flags on any command, or the bundled skill
 (`skills/trilium/SKILL.md`) for the full command reference and decision guidance.
@@ -55,7 +53,7 @@ export TRILIUM_URL=https://trilium.example.com
 export TRILIUM_TOKEN=your-etapi-token
 export EMBEDDING_PROVIDER=local   # zero-API-key CPU model; or openai-compatible, see semanticd's README
 
-npx -p @myceliumhq/tri tri-semanticd
+tri-semanticd   # or: npx -p @myceliumhq/tri tri-semanticd
 ```
 
 Or as a container: `ghcr.io/myceliumhq/tri-semanticd:<version>` (built from `Dockerfile.semanticd`,
@@ -65,7 +63,7 @@ the sidecar's over HTTP (`GET /query?q=...`) automatically, no separate mode to 
 
 ```bash
 export TRILIUM_SEMANTICD_URL=http://localhost:4499
-npx @myceliumhq/tri search "book recommendations"
+tri search "book recommendations"
 ```
 
 Unset (or the sidecar unreachable), `tri search` transparently falls back to lexical-only --
