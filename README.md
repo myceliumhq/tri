@@ -44,11 +44,11 @@ See `tri <command> --help` for flags on any command, or the bundled skill
 
 ## Semantic search
 
-`tri search` is lexical/attribute-only (Trilium's own query language). Optional semantic search
-is available as a separate sidecar, `tri-semanticd` -- this package's own binary, built on
+`tri search` is Trilium's own lexical/attribute query language by default. Optional semantic
+search is available as a separate sidecar, `tri-semanticd` -- this package's own binary, built on
 [`@myceliumhq/semanticd`](https://github.com/myceliumhq/semanticd) with this repo's Trilium
 adapter wired in directly. Run it alongside your Trilium instance and it syncs a local vector
-index you can query directly over HTTP (`GET /query?q=...`):
+index:
 
 ```bash
 export TRILIUM_URL=https://trilium.example.com
@@ -59,9 +59,17 @@ npx -p @myceliumhq/tri tri-semanticd
 ```
 
 Or as a container: `ghcr.io/myceliumhq/tri-semanticd:<version>` (built from `Dockerfile.semanticd`,
-published on every tagged release). The standalone MCP server below queries a deployed sidecar
-automatically once pointed at it; `tri search` does not call it yet -- that integration is planned
-but not built.
+published on every tagged release). Once it's running, point both the CLI and the standalone MCP
+server below at it with `TRILIUM_SEMANTICD_URL` -- `tri search` fuses its own lexical results with
+the sidecar's over HTTP (`GET /query?q=...`) automatically, no separate mode to pick:
+
+```bash
+export TRILIUM_SEMANTICD_URL=http://localhost:4499
+npx @myceliumhq/tri search "book recommendations"
+```
+
+Unset (or the sidecar unreachable), `tri search` transparently falls back to lexical-only --
+nothing to configure to keep using it without a sidecar.
 
 ## Standalone MCP server
 
