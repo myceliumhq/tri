@@ -1,6 +1,6 @@
 ---
 name: "trilium"
-description: "Search, read, and lightly organize the user's Trilium notes with the `tri` CLI (search, read, write, tree, journal, attach, attr). On-demand: find a note, check what's in the journal, attach an image, add a label."
+description: "Search, read, and lightly organize the user's Trilium notes with the `tri` CLI (search, read, write, create, tree, journal, attach, attr). On-demand: find a note, check what's in the journal, attach an image, add a label."
 ---
 
 # Trilium Notes (`tri` CLI)
@@ -19,6 +19,7 @@ identical.
 | --- | --- |
 | `tri search <query> [--limit N]` | Trilium's own query language: free text + `#label`/`~relation`/`note.property` filters, AND/OR/NOT. Hybrid lexical+semantic automatically -- no separate mode to pick. |
 | `tri note get <id>` | Metadata: title, type, labels, relations, parent/child ids. No content. |
+| `tri note create <parent> --title <t> [--content text]` | Create a note under a specified parent. |
 | `tri note read <id>` | Content to stdout, as Markdown for `text` notes (raw source for `code` notes). |
 | `tri note write <id> [--file f.md]` | Replace a note's content entirely. Reads Markdown from `--file` or stdin. |
 | `tri note append <id> [--file f.md]` | Add to the end of a note's content, server-side -- prefer this over read-then-write when you're only adding, not editing. |

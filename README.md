@@ -28,6 +28,7 @@ export TRILIUM_TOKEN=your-etapi-token  # Options -> ETAPI -> Create new ETAPI to
 tri doctor
 tri search "#book #year >= 1950"
 tri note read abc123
+tri note create root --title "Project notes" --content "# Plan"
 tri note append abc123 --file notes.md
 tri tree root --depth 3
 tri journal today
