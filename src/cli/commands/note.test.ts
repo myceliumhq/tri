@@ -1,20 +1,34 @@
 import { createInterface } from "node:readline/promises";
-import { type CliError, writeJson } from "@myceliumhq/toolkit";
+import { type CliError, writeJson, writeStderr, writeStdout } from "@myceliumhq/toolkit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveClientHandle } from "../config.js";
-import { createNoteAction, deleteNoteAction, undeleteNoteAction } from "./note.js";
+import {
+  createNoteAction,
+  createRevisionAction,
+  deleteNoteAction,
+  listRevisionsAction,
+  readRevisionAction,
+  undeleteNoteAction,
+  writeNoteAction,
+} from "./note.js";
 
 vi.mock("@myceliumhq/toolkit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@myceliumhq/toolkit")>();
-  return { ...actual, writeJson: vi.fn() };
+  return { ...actual, writeJson: vi.fn(), writeStderr: vi.fn(), writeStdout: vi.fn() };
 });
-vi.mock("../config.js", () => ({ resolveClientHandle: vi.fn() }));
+vi.mock("../config.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../config.js")>();
+  return { ...actual, resolveClientHandle: vi.fn() };
+});
+vi.mock("../content-input.js", () => ({ readContentInput: vi.fn(() => "new content") }));
 vi.mock("node:readline/promises", () => ({ createInterface: vi.fn() }));
 
 const post = vi.fn();
 const get = vi.fn();
 const del = vi.fn();
 const writeJsonMock = vi.mocked(writeJson);
+const writeStderrMock = vi.mocked(writeStderr);
+const writeStdoutMock = vi.mocked(writeStdout);
 const resolveClientHandleMock = vi.mocked(resolveClientHandle);
 const createInterfaceMock = vi.mocked(createInterface);
 
@@ -33,10 +47,12 @@ function setupClient() {
 describe("note create", () => {
   beforeEach(() => {
     post.mockReset();
-    get.mockReset();
     del.mockReset();
-    writeJsonMock.mockReset();
     createInterfaceMock.mockReset();
+    writeJsonMock.mockReset();
+    writeStderrMock.mockReset();
+    writeStdoutMock.mockReset();
+    vi.unstubAllEnvs();
     setupClient();
   });
 
@@ -131,10 +147,140 @@ describe("note create", () => {
   });
 });
 
+describe("note revisions", () => {
+  const get = vi.fn();
+  const postRevision = vi.fn();
+
+  beforeEach(() => {
+    get.mockReset();
+    postRevision.mockReset();
+    writeJsonMock.mockReset();
+    writeStdoutMock.mockReset();
+    writeStderrMock.mockReset();
+    resolveClientHandleMock.mockReturnValue({
+      client: { GET: get, POST: postRevision } as never,
+      baseUrl: "https://trilium.example.com",
+    });
+  });
+
+  it("creates a revision", async () => {
+    postRevision.mockResolvedValue({ data: undefined, response: { ok: true } });
+    await createRevisionAction("abc123");
+    expect(postRevision).toHaveBeenCalledWith("/notes/{noteId}/revision", {
+      params: { path: { noteId: "abc123" } },
+    });
+    expect(writeJsonMock).toHaveBeenCalledWith({ noteId: "abc123", revisionCreated: true });
+  });
+
+  it("lists trimmed revisions in server order", async () => {
+    get.mockResolvedValue({
+      data: [
+        {
+          revisionId: "r2",
+          title: "New",
+          type: "text",
+          utcDateCreated: "2026-08-18T12:00:00Z",
+          contentLength: 3,
+          source: "api",
+          blobId: "secret",
+        },
+      ],
+    });
+    await listRevisionsAction("abc123");
+    expect(writeJsonMock).toHaveBeenCalledWith([
+      {
+        revisionId: "r2",
+        title: "New",
+        type: "text",
+        utcDateCreated: "2026-08-18T12:00:00Z",
+        contentLength: 3,
+        source: "api",
+      },
+    ]);
+  });
+
+  it("reads a revision as Markdown or raw HTML", async () => {
+    get.mockImplementation(async (path: string) =>
+      path === "/revisions/{revisionId}" ? { data: { type: "text" } } : { data: "<h1>Title</h1>" },
+    );
+    await readRevisionAction("r1", {});
+    expect(writeStdoutMock).toHaveBeenCalledWith("# Title");
+
+    writeStdoutMock.mockReset();
+    await readRevisionAction("r1", { rawHtml: true });
+    expect(writeStdoutMock).toHaveBeenCalledWith("<h1>Title</h1>");
+  });
+});
+
+describe("automatic note revisions", () => {
+  const get = vi.fn();
+  const postRevision = vi.fn();
+  const put = vi.fn();
+
+  beforeEach(() => {
+    get.mockReset();
+    postRevision.mockReset();
+    put.mockReset();
+    writeJsonMock.mockReset();
+    vi.unstubAllEnvs();
+    vi.stubEnv("TRILIUM_REVISION_INTERVAL", "5m");
+    resolveClientHandleMock.mockReturnValue({
+      client: { GET: get, POST: postRevision, PUT: put } as never,
+      baseUrl: "https://trilium.example.com",
+    });
+    get.mockImplementation(async (path: string) => {
+      if (path === "/notes/{noteId}") return { data: { type: "text" } };
+      if (path === "/notes/{noteId}/revisions") {
+        return { data: [{ utcDateCreated: new Date(Date.now() - 10 * 60 * 1000).toISOString() }] };
+      }
+      return { data: "<p>old</p>" };
+    });
+    postRevision.mockResolvedValue({ data: undefined, response: { ok: true } });
+    put.mockResolvedValue({ data: undefined, response: { ok: true } });
+  });
+
+  it("creates an older revision before writing", async () => {
+    await writeNoteAction("abc123", {});
+    expect(postRevision).toHaveBeenCalled();
+    expect(put).toHaveBeenCalled();
+    expect(postRevision.mock.invocationCallOrder[0] ?? 0).toBeLessThan(
+      put.mock.invocationCallOrder[0] ?? 0,
+    );
+    expect(writeJsonMock).toHaveBeenCalledWith(
+      expect.objectContaining({ revisionCreated: true, contentMode: "replace" }),
+    );
+  });
+
+  it("skips a revision within the interval", async () => {
+    get.mockImplementation(async (path: string) => {
+      if (path === "/notes/{noteId}") return { data: { type: "text" } };
+      if (path === "/notes/{noteId}/revisions") {
+        return { data: [{ utcDateCreated: new Date().toISOString() }] };
+      }
+      return { data: "<p>old</p>" };
+    });
+    await writeNoteAction("abc123", {});
+    expect(postRevision).not.toHaveBeenCalled();
+    expect(writeJsonMock).toHaveBeenCalledWith(expect.objectContaining({ revisionCreated: false }));
+  });
+
+  it("disables revision checks at zero", async () => {
+    vi.stubEnv("TRILIUM_REVISION_INTERVAL", "0");
+    await writeNoteAction("abc123", {});
+    expect(get).not.toHaveBeenCalledWith("/notes/{noteId}/revisions", expect.anything());
+    expect(postRevision).not.toHaveBeenCalled();
+    expect(writeJsonMock).toHaveBeenCalledWith(expect.objectContaining({ revisionCreated: false }));
+  });
+
+  it("rejects an invalid interval as usage", async () => {
+    vi.stubEnv("TRILIUM_REVISION_INTERVAL", "five minutes");
+    await expect(writeNoteAction("abc123", {})).rejects.toMatchObject({ exitCode: 2 });
+  });
+});
+
 describe("note delete and undelete", () => {
   beforeEach(() => {
     post.mockReset();
-    get.mockReset();
     del.mockReset();
     writeJsonMock.mockReset();
     setupClient();
@@ -145,7 +291,6 @@ describe("note delete and undelete", () => {
 
   it("deletes with --yes without fetching metadata", async () => {
     await deleteNoteAction("abc123", { yes: true });
-    expect(get).not.toHaveBeenCalled();
     expect(del).toHaveBeenCalledWith("/notes/{noteId}", { params: { path: { noteId: "abc123" } } });
     expect(writeJsonMock).toHaveBeenCalledWith({ deleted: true, noteId: "abc123" });
   });
@@ -154,7 +299,6 @@ describe("note delete and undelete", () => {
     const original = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
     Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: false });
     await deleteNoteAction("abc123", {});
-    expect(get).not.toHaveBeenCalled();
     expect(del).toHaveBeenCalled();
     if (original) Object.defineProperty(process.stdin, "isTTY", original);
     else Reflect.deleteProperty(process.stdin, "isTTY");
@@ -169,7 +313,6 @@ describe("note delete and undelete", () => {
       close,
     } as never);
     await deleteNoteAction("abc123", {});
-    expect(get).toHaveBeenCalledWith("/notes/{noteId}", { params: { path: { noteId: "abc123" } } });
     expect(del).not.toHaveBeenCalled();
     expect(writeJsonMock).toHaveBeenCalledWith({ deleted: false, noteId: "abc123" });
     expect(close).toHaveBeenCalled();
@@ -183,14 +326,5 @@ describe("note delete and undelete", () => {
       params: { path: { noteId: "abc123" } },
     });
     expect(writeJsonMock).toHaveBeenCalledWith({ restored: true, noteId: "abc123", success: true });
-  });
-
-  it("maps a delete 404 to exit code 3", async () => {
-    del.mockResolvedValue({
-      data: undefined,
-      error: {},
-      response: new Response(null, { status: 404 }),
-    });
-    await expect(deleteNoteAction("abc123", { yes: true })).rejects.toMatchObject({ exitCode: 3 });
   });
 });

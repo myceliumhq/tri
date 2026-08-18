@@ -33,6 +33,7 @@ tri note create root --title "Project notes" --content "# Plan"
 tri note append abc123 --file notes.md
 tri note delete abc123 --yes
 tri note undelete abc123
+tri note revision list abc123
 tri tree root --depth 3
 tri journal today
 tri attach add abc123 ./diagram.png
