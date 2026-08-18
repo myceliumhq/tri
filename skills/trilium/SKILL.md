@@ -1,13 +1,14 @@
 ---
 name: "trilium"
-description: "Search, read, and lightly organize the user's Trilium notes with the `tri` CLI (search, read, write, create, tree, journal, attach, attr). On-demand: find a note, check what's in the journal, attach an image, add a label."
+description: "Search, read, and lightly organize the user's Trilium notes with the `tri` CLI (search, read, write, create, revisions, tree, journal, attach, attr). On-demand: find a note, check what's in the journal, attach an image, add a label."
 ---
 
 # Trilium Notes (`tri` CLI)
 
 `tri --help` lists every command; `tri <command> --help` shows its flags. Config comes from
 `TRILIUM_URL`/`TRILIUM_TOKEN` env vars -- run `tri doctor` first if a command fails with a config
-error.
+error. `note write` and `note append` create a debounced undo-point revision by default; set
+`TRILIUM_REVISION_INTERVAL` to a duration such as `5m` or `30s`, or `0`/`off` to disable.
 
 Run `tri` directly if it's on PATH (`command -v tri`). Only if it isn't, fall back to
 `npx @myceliumhq/tri` -- substitute that prefix for `tri` in every command below, otherwise
@@ -25,6 +26,9 @@ identical.
 | `tri note append <id> [--file f.md]` | Add to the end of a note's content, server-side -- prefer this over read-then-write when you're only adding, not editing. |
 | `tri note delete <id> [--yes]` | Move a note and its subtree to deleted notes (soft delete); TTY prompts unless `--yes`. |
 | `tri note undelete <id>` | Restore a deleted note when a non-deleted former parent exists. |
+| `tri note revision create <id>` | Snapshot a note's current title and content before a planned change. |
+| `tri note revision list <id>` | List a note's revision snapshots, newest first. |
+| `tri note revision read <revisionId> [--raw-html]` | Read a revision's content to stdout, as Markdown for text revisions. |
 | `tri tree <id> [--depth N]` | Indented subtree outline with ids inline, for browsing structure. |
 | `tri journal [date\|today]` | Get-or-create the day journal note. Use this for "today's note" / "this week", not `search`. |
 | `tri attach add <id> <file>` | Attach a file (e.g. an image) to a note -- the file's bytes go straight from disk, never through your own context. |
@@ -53,6 +57,8 @@ identical.
   for ordinary prose. `code`-type notes are raw source, byte-for-byte, no conversion.
 - Prefer `note append` over `note read` + `note write` when you're only adding content -- it's one
   call instead of two, and the existing body never has to pass through your context.
+- `note write` and `note append` automatically create a revision before a mutation when the newest
+  revision is older than `TRILIUM_REVISION_INTERVAL` (default `5m`).
 - Exit codes are deterministic: `0` ok, `2` bad usage (fix the command), `3` not found (bad id),
   `4` config/auth (run `tri doctor`). Branch on these instead of parsing stderr text.
 

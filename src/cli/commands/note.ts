@@ -10,7 +10,7 @@ import {
   writeStdout,
 } from "@myceliumhq/toolkit";
 import { formatContentForWrite, htmlToMarkdown, normalizeLineEndings } from "../../tools/html.js";
-import { resolveClientHandle } from "../config.js";
+import { resolveClientHandle, resolveRevisionInterval } from "../config.js";
 import { readContentInput } from "../content-input.js";
 import { unwrapCli } from "../etapi.js";
 
@@ -176,12 +176,133 @@ export async function undeleteNoteAction(noteId: string): Promise<void> {
   writeJson({ restored: true, noteId, success: result.success ?? true });
 }
 
+async function maybeCreateRevision(
+  client: ReturnType<typeof resolveClientHandle>["client"],
+  noteId: string,
+): Promise<boolean> {
+  const interval = resolveRevisionInterval();
+  if (interval === undefined) return false;
+
+  const revisions = await unwrapCli(
+    client.GET("/notes/{noteId}/revisions", { params: { path: { noteId } } }),
+  );
+  const newest = revisions?.[0];
+  const createdAt = newest?.utcDateCreated ? Date.parse(newest.utcDateCreated) : Number.NaN;
+  if (Number.isFinite(createdAt) && Date.now() - createdAt <= interval) return false;
+
+  await unwrapCli(client.POST("/notes/{noteId}/revision", { params: { path: { noteId } } }));
+  return true;
+}
+
+export async function createRevisionAction(noteId: string): Promise<void> {
+  const { client } = resolveClientHandle();
+  await unwrapCli(client.POST("/notes/{noteId}/revision", { params: { path: { noteId } } }));
+  writeJson({ noteId, revisionCreated: true });
+}
+
+export async function listRevisionsAction(noteId: string): Promise<void> {
+  const { client } = resolveClientHandle();
+  const revisions = await unwrapCli(
+    client.GET("/notes/{noteId}/revisions", { params: { path: { noteId } } }),
+  );
+  writeJson(
+    (revisions ?? []).map((revision) => ({
+      revisionId: revision.revisionId,
+      title: revision.title,
+      type: revision.type,
+      utcDateCreated: revision.utcDateCreated,
+      contentLength: revision.contentLength,
+      source: (revision as typeof revision & { source?: string }).source,
+    })),
+  );
+}
+
+export async function readRevisionAction(
+  revisionId: string,
+  options: { rawHtml?: boolean },
+): Promise<void> {
+  const { client } = resolveClientHandle();
+  const [revision, raw] = await Promise.all([
+    unwrapCli(client.GET("/revisions/{revisionId}", { params: { path: { revisionId } } })),
+    unwrapCli(
+      client.GET("/revisions/{revisionId}/content", {
+        params: { path: { revisionId } },
+        parseAs: "text",
+      }),
+    ).then((content) => content ?? ""),
+  ]);
+  const content =
+    !(options.rawHtml ?? false) && revision.type === "text" ? htmlToMarkdown(raw) : raw;
+  const normalized = normalizeLineEndings(content);
+  if (normalized.trim().length === 0) writeStderr("# this revision has no content.");
+  writeStdout(normalized);
+}
+
+export async function writeNoteAction(
+  noteId: string,
+  options: { file?: string; allowEmpty?: boolean },
+): Promise<void> {
+  const rawContent = readContentInput(options.file, "tri note write", {
+    allowEmpty: options.allowEmpty,
+  });
+
+  const { client, baseUrl } = resolveClientHandle();
+  const meta = await unwrapCli(client.GET("/notes/{noteId}", { params: { path: { noteId } } }));
+  const revisionCreated = await maybeCreateRevision(client, noteId);
+  await putContent(client, noteId, formatContentForWrite(rawContent, meta.type ?? "text"));
+
+  writeJson({ noteId, url: `${baseUrl}/#${noteId}`, contentMode: "replace", revisionCreated });
+}
+
+export async function appendNoteAction(
+  noteId: string,
+  options: { file?: string; allowEmpty?: boolean },
+): Promise<void> {
+  const rawContent = readContentInput(options.file, "tri note append", {
+    allowEmpty: options.allowEmpty,
+  });
+
+  const { client, baseUrl } = resolveClientHandle();
+  const [meta, existing] = await Promise.all([
+    unwrapCli(client.GET("/notes/{noteId}", { params: { path: { noteId } } })),
+    unwrapCli(
+      client.GET("/notes/{noteId}/content", { params: { path: { noteId } }, parseAs: "text" }),
+    ).then((content) => content ?? ""),
+  ]);
+
+  const noteType = meta.type ?? "text";
+  const formatted = formatContentForWrite(rawContent, noteType);
+  const separator =
+    existing.length > 0 && noteType !== "text" && !existing.endsWith("\n") ? "\n" : "";
+  const revisionCreated = await maybeCreateRevision(client, noteId);
+  await putContent(client, noteId, existing + separator + formatted);
+
+  writeJson({ noteId, url: `${baseUrl}/#${noteId}`, contentMode: "append", revisionCreated });
+}
+
 export function registerNote(program: Command): void {
   const note = addSubcommand(program, "note")
     .summary("Note metadata, content, create/read/write/append/delete/undelete.")
     .description(
       "Note metadata and content -- get, create, read, write, append, delete, undelete.",
     );
+
+  const revision = addSubcommand(note, "revision")
+    .summary("Note revisions -- create, list, read snapshots.")
+    .description("Note revisions -- create, list, read snapshots.");
+
+  addSubcommand(revision, "create <noteId>")
+    .summary("Create a note revision snapshot.")
+    .action(createRevisionAction);
+
+  addSubcommand(revision, "list <noteId>")
+    .summary("List a note's revision snapshots.")
+    .action(listRevisionsAction);
+
+  addSubcommand(revision, "read <revisionId>")
+    .summary("Read a revision snapshot's content.")
+    .option("--raw-html", "Skip HTML-to-Markdown conversion for text revisions.")
+    .action(readRevisionAction);
 
   addSubcommand(note, "create <parentNoteId>")
     .summary("Create a note under a parent note.")
@@ -283,17 +404,7 @@ export function registerNote(program: Command): void {
       "Allow writing empty content (guards against an accidental empty pipe/file).",
     )
     .addHelpText("after", "\nExample: tri note write abc123 --file draft.md")
-    .action(async (noteId: string, options: { file?: string; allowEmpty?: boolean }) => {
-      const rawContent = readContentInput(options.file, "tri note write", {
-        allowEmpty: options.allowEmpty,
-      });
-
-      const { client, baseUrl } = resolveClientHandle();
-      const meta = await unwrapCli(client.GET("/notes/{noteId}", { params: { path: { noteId } } }));
-      await putContent(client, noteId, formatContentForWrite(rawContent, meta.type ?? "text"));
-
-      writeJson({ noteId, url: `${baseUrl}/#${noteId}`, contentMode: "replace" });
-    });
+    .action(writeNoteAction);
 
   addSubcommand(note, "append <noteId>")
     .summary("Add content to the end of a note.")
@@ -308,33 +419,7 @@ export function registerNote(program: Command): void {
       "Allow appending empty content (guards against an accidental empty pipe/file).",
     )
     .addHelpText("after", "\nExample: echo '## New section' | tri note append abc123")
-    .action(async (noteId: string, options: { file?: string; allowEmpty?: boolean }) => {
-      const rawContent = readContentInput(options.file, "tri note append", {
-        allowEmpty: options.allowEmpty,
-      });
-
-      const { client, baseUrl } = resolveClientHandle();
-      // Independent requests -- neither the note's type nor its existing
-      // content depends on the other, so both round trips run
-      // concurrently.
-      const [meta, existing] = await Promise.all([
-        unwrapCli(client.GET("/notes/{noteId}", { params: { path: { noteId } } })),
-        unwrapCli(
-          client.GET("/notes/{noteId}/content", { params: { path: { noteId } }, parseAs: "text" }),
-        ).then((content) => content ?? ""),
-      ]);
-
-      const noteType = meta.type ?? "text";
-      const formatted = formatContentForWrite(rawContent, noteType);
-      // A `text` note's HTML blocks (e.g. adjacent <p> tags) don't need an
-      // extra separator; raw-source types do, unless the existing content
-      // already ends in one.
-      const separator =
-        existing.length > 0 && noteType !== "text" && !existing.endsWith("\n") ? "\n" : "";
-      await putContent(client, noteId, existing + separator + formatted);
-
-      writeJson({ noteId, url: `${baseUrl}/#${noteId}`, contentMode: "append" });
-    });
+    .action(appendNoteAction);
 
   addSubcommand(note, "delete <noteId>")
     .summary("Move a note and its subtree to deleted notes.")
