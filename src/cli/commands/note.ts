@@ -1,6 +1,9 @@
 import {
   addSubcommand,
+  CliError,
   type Command,
+  EXIT_CODES,
+  parseBoundedInt,
   writeJson,
   writeStderr,
   writeStdout,
@@ -9,6 +12,105 @@ import { formatContentForWrite, htmlToMarkdown, normalizeLineEndings } from "../
 import { resolveClientHandle } from "../config.js";
 import { readContentInput } from "../content-input.js";
 import { unwrapCli } from "../etapi.js";
+
+const NOTE_TYPES = [
+  "text",
+  "code",
+  "file",
+  "image",
+  "search",
+  "book",
+  "relationMap",
+  "render",
+] as const;
+const MAX_POSITION = 1_000_000;
+
+function collectOption(value: string, previous: string[]): string[] {
+  return previous.concat(value);
+}
+
+function splitNameValue(arg: string): { name: string; value: string | undefined } {
+  const eq = arg.indexOf("=");
+  if (eq === -1) return { name: arg, value: undefined };
+  return { name: arg.slice(0, eq), value: arg.slice(eq + 1) };
+}
+
+function parsePosition(raw: string | undefined): number | undefined {
+  return raw === undefined
+    ? undefined
+    : parseBoundedInt(raw, { min: 0, max: MAX_POSITION, flag: "--position" });
+}
+
+type CreateNoteOptions = {
+  title: string;
+  content?: string;
+  file?: string;
+  allowEmpty?: boolean;
+  type: string;
+  label: string[];
+  mime?: string;
+  position?: string;
+};
+
+export async function createNoteAction(
+  parentNoteId: string,
+  options: CreateNoteOptions,
+): Promise<void> {
+  if (!NOTE_TYPES.includes(options.type as (typeof NOTE_TYPES)[number])) {
+    throw new CliError(`invalid note type: ${options.type}`, { exitCode: EXIT_CODES.usage });
+  }
+  if (options.content !== undefined && options.file !== undefined) {
+    throw new CliError("--content and --file cannot be used together", {
+      exitCode: EXIT_CODES.usage,
+    });
+  }
+  // Validate labels up front -- a bad --label must fail before the note is
+  // created, not after, so a typo never leaves an orphaned note behind.
+  const parsedLabels = options.label.map((label) => {
+    const { name, value } = splitNameValue(label);
+    if (!name) {
+      throw new CliError("label name is empty", { exitCode: EXIT_CODES.usage });
+    }
+    return { name, value };
+  });
+
+  const content =
+    options.content ??
+    readContentInput(options.file, "tri note create", { allowEmpty: options.allowEmpty });
+  const type = options.type as (typeof NOTE_TYPES)[number];
+  const notePosition = parsePosition(options.position);
+  const { client, baseUrl } = resolveClientHandle();
+  const result = await unwrapCli(
+    client.POST("/create-note", {
+      body: {
+        parentNoteId,
+        title: options.title,
+        type,
+        mime: options.mime,
+        content: formatContentForWrite(content, type),
+        notePosition,
+      },
+    }),
+  );
+  const noteId = result.note?.noteId;
+  const labels: string[] = [];
+  for (const { name, value } of parsedLabels) {
+    await unwrapCli(
+      client.POST("/attributes", {
+        body: { noteId, type: "label", name, value },
+      }),
+    );
+    labels.push(value === undefined ? name : `${name}=${value}`);
+  }
+
+  writeJson({
+    noteId,
+    title: result.note?.title ?? options.title,
+    type: result.note?.type ?? type,
+    url: `${baseUrl}/#${noteId}`,
+    ...(labels.length > 0 ? { labels } : {}),
+  });
+}
 
 function flattenAttributes(attributes: unknown): { labels: string[]; relations: unknown[] } {
   const attrs = Array.isArray(attributes) ? (attributes as Record<string, unknown>[]) : [];
@@ -43,8 +145,27 @@ async function putContent(
 
 export function registerNote(program: Command): void {
   const note = addSubcommand(program, "note")
-    .summary("Note metadata, content, read/write/append.")
-    .description("Note metadata and content -- get, read, write, append.");
+    .summary("Note metadata, content, create/read/write/append.")
+    .description("Note metadata and content -- get, create, read, write, append.");
+
+  addSubcommand(note, "create <parentNoteId>")
+    .summary("Create a note under a parent note.")
+    .description(
+      "Create a note under the specified parent, with optional labels and initial content.",
+    )
+    .requiredOption("--title <t>", "Note title.")
+    .option("--file <path>", "Read content from this file instead of stdin.")
+    .option("--content <text>", "Short content snippet instead of --file or stdin.")
+    .option("--allow-empty", "Allow empty content from --file or stdin.")
+    .option("--type <type>", "Note type.", "text")
+    .option("--label <name=value>", "Add a label; may omit =value.", collectOption, [])
+    .option("--mime <mime>", "MIME type for code, file, or image notes.")
+    .option("--position <n>", "Display order among the parent's children.")
+    .addHelpText(
+      "after",
+      "\nExample: tri note create root --title 'Project notes' --content '# Plan'",
+    )
+    .action(createNoteAction);
 
   addSubcommand(note, "get <noteId>")
     .summary("Note metadata: title, type, labels, relations.")
