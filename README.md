@@ -9,7 +9,8 @@ write, and lightly organize notes -- covering the same workflows you'd otherwise
 Trilium's own UI.
 
 Built for coding agents: token-cheap `--help`, deterministic exit codes, file-path-based
-attachment I/O (bytes never round-trip through an agent's context), no interactive prompts.
+attachment I/O (bytes never round-trip through an agent's context), and no prompts in piped/agent
+contexts (interactive TTY deletes ask for confirmation).
 
 A standalone [MCP](https://modelcontextprotocol.io) server is also included, for hosts without a
 shell.
@@ -30,6 +31,8 @@ tri search "#book #year >= 1950"
 tri note read abc123
 tri note create root --title "Project notes" --content "# Plan"
 tri note append abc123 --file notes.md
+tri note delete abc123 --yes
+tri note undelete abc123
 tri tree root --depth 3
 tri journal today
 tri attach add abc123 ./diagram.png

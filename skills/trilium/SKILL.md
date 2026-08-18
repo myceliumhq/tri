@@ -23,6 +23,8 @@ identical.
 | `tri note read <id>` | Content to stdout, as Markdown for `text` notes (raw source for `code` notes). |
 | `tri note write <id> [--file f.md]` | Replace a note's content entirely. Reads Markdown from `--file` or stdin. |
 | `tri note append <id> [--file f.md]` | Add to the end of a note's content, server-side -- prefer this over read-then-write when you're only adding, not editing. |
+| `tri note delete <id> [--yes]` | Move a note and its subtree to deleted notes (soft delete); TTY prompts unless `--yes`. |
+| `tri note undelete <id>` | Restore a deleted note when a non-deleted former parent exists. |
 | `tri tree <id> [--depth N]` | Indented subtree outline with ids inline, for browsing structure. |
 | `tri journal [date\|today]` | Get-or-create the day journal note. Use this for "today's note" / "this week", not `search`. |
 | `tri attach add <id> <file>` | Attach a file (e.g. an image) to a note -- the file's bytes go straight from disk, never through your own context. |
