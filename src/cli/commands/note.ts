@@ -1,3 +1,4 @@
+import { createInterface } from "node:readline/promises";
 import {
   addSubcommand,
   CliError,
@@ -143,10 +144,44 @@ async function putContent(
   );
 }
 
+type DeleteNoteOptions = { yes?: boolean };
+
+export async function deleteNoteAction(noteId: string, options: DeleteNoteOptions): Promise<void> {
+  const { client } = resolveClientHandle();
+
+  if (!options.yes && process.stdin.isTTY) {
+    const note = await unwrapCli(client.GET("/notes/{noteId}", { params: { path: { noteId } } }));
+    const prompt = createInterface({ input: process.stdin, terminal: false });
+    process.stderr.write(`Delete note "${note.title ?? ""}" (${noteId})? [y/N] `);
+    try {
+      const answer = await prompt.question("");
+      if (!/^y$/i.test(answer.trim())) {
+        writeJson({ deleted: false, noteId });
+        return;
+      }
+    } finally {
+      prompt.close();
+    }
+  }
+
+  await unwrapCli(client.DELETE("/notes/{noteId}", { params: { path: { noteId } } }));
+  writeJson({ deleted: true, noteId });
+}
+
+export async function undeleteNoteAction(noteId: string): Promise<void> {
+  const { client } = resolveClientHandle();
+  const result = await unwrapCli(
+    client.POST("/notes/{noteId}/undelete", { params: { path: { noteId } } }),
+  );
+  writeJson({ restored: true, noteId, success: result.success ?? true });
+}
+
 export function registerNote(program: Command): void {
   const note = addSubcommand(program, "note")
-    .summary("Note metadata, content, create/read/write/append.")
-    .description("Note metadata and content -- get, create, read, write, append.");
+    .summary("Note metadata, content, create/read/write/append/delete/undelete.")
+    .description(
+      "Note metadata and content -- get, create, read, write, append, delete, undelete.",
+    );
 
   addSubcommand(note, "create <parentNoteId>")
     .summary("Create a note under a parent note.")
@@ -300,4 +335,24 @@ export function registerNote(program: Command): void {
 
       writeJson({ noteId, url: `${baseUrl}/#${noteId}`, contentMode: "append" });
     });
+
+  addSubcommand(note, "delete <noteId>")
+    .summary("Move a note and its subtree to deleted notes.")
+    .description(
+      "Move the note and its whole subtree, if it has children, to Trilium's deleted-notes state; " +
+        "this is not a permanent hard delete. Restore it with `tri note undelete` as long as at " +
+        "least one former parent still exists and is not itself deleted. A `note get` on a deleted " +
+        "note returns NOT_FOUND. Without --yes, a TTY prompts for confirmation; non-TTY input " +
+        "deletes immediately.",
+    )
+    .option("--yes", "Skip confirmation.")
+    .action(deleteNoteAction);
+
+  addSubcommand(note, "undelete <noteId>")
+    .summary("Restore a note from deleted notes.")
+    .description(
+      "Restore a deleted note. Restoration requires at least one non-deleted former parent; if the " +
+        "whole ancestor chain was deleted, restore from the top of the chain down.",
+    )
+    .action(undeleteNoteAction);
 }

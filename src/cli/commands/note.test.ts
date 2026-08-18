@@ -1,17 +1,22 @@
+import { createInterface } from "node:readline/promises";
 import { type CliError, writeJson } from "@myceliumhq/toolkit";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveClientHandle } from "../config.js";
-import { createNoteAction } from "./note.js";
+import { createNoteAction, deleteNoteAction, undeleteNoteAction } from "./note.js";
 
 vi.mock("@myceliumhq/toolkit", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@myceliumhq/toolkit")>();
   return { ...actual, writeJson: vi.fn() };
 });
 vi.mock("../config.js", () => ({ resolveClientHandle: vi.fn() }));
+vi.mock("node:readline/promises", () => ({ createInterface: vi.fn() }));
 
 const post = vi.fn();
+const get = vi.fn();
+const del = vi.fn();
 const writeJsonMock = vi.mocked(writeJson);
 const resolveClientHandleMock = vi.mocked(resolveClientHandle);
+const createInterfaceMock = vi.mocked(createInterface);
 
 function setupClient() {
   post.mockImplementation(async (path: string) =>
@@ -20,7 +25,7 @@ function setupClient() {
       : { data: { attributeId: "attr123" } },
   );
   resolveClientHandleMock.mockReturnValue({
-    client: { POST: post } as never,
+    client: { GET: get, POST: post, DELETE: del } as never,
     baseUrl: "https://trilium.example.com",
   });
 }
@@ -28,7 +33,10 @@ function setupClient() {
 describe("note create", () => {
   beforeEach(() => {
     post.mockReset();
+    get.mockReset();
+    del.mockReset();
     writeJsonMock.mockReset();
+    createInterfaceMock.mockReset();
     setupClient();
   });
 
@@ -120,5 +128,69 @@ describe("note create", () => {
       }),
     ).rejects.toMatchObject({ exitCode: 2 } satisfies Partial<CliError>);
     expect(post).not.toHaveBeenCalled();
+  });
+});
+
+describe("note delete and undelete", () => {
+  beforeEach(() => {
+    post.mockReset();
+    get.mockReset();
+    del.mockReset();
+    writeJsonMock.mockReset();
+    setupClient();
+    del.mockResolvedValue({ data: undefined, response: new Response(null, { status: 204 }) });
+    post.mockResolvedValue({ data: { success: true } });
+    get.mockResolvedValue({ data: { noteId: "abc123", title: "Titel" } });
+  });
+
+  it("deletes with --yes without fetching metadata", async () => {
+    await deleteNoteAction("abc123", { yes: true });
+    expect(get).not.toHaveBeenCalled();
+    expect(del).toHaveBeenCalledWith("/notes/{noteId}", { params: { path: { noteId: "abc123" } } });
+    expect(writeJsonMock).toHaveBeenCalledWith({ deleted: true, noteId: "abc123" });
+  });
+
+  it("deletes immediately when stdin is not a TTY", async () => {
+    const original = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: false });
+    await deleteNoteAction("abc123", {});
+    expect(get).not.toHaveBeenCalled();
+    expect(del).toHaveBeenCalled();
+    if (original) Object.defineProperty(process.stdin, "isTTY", original);
+    else Reflect.deleteProperty(process.stdin, "isTTY");
+  });
+
+  it("aborts a TTY delete when confirmation is not y", async () => {
+    const original = Object.getOwnPropertyDescriptor(process.stdin, "isTTY");
+    Object.defineProperty(process.stdin, "isTTY", { configurable: true, value: true });
+    const close = vi.fn();
+    createInterfaceMock.mockReturnValue({
+      question: vi.fn().mockResolvedValue("n"),
+      close,
+    } as never);
+    await deleteNoteAction("abc123", {});
+    expect(get).toHaveBeenCalledWith("/notes/{noteId}", { params: { path: { noteId: "abc123" } } });
+    expect(del).not.toHaveBeenCalled();
+    expect(writeJsonMock).toHaveBeenCalledWith({ deleted: false, noteId: "abc123" });
+    expect(close).toHaveBeenCalled();
+    if (original) Object.defineProperty(process.stdin, "isTTY", original);
+    else Reflect.deleteProperty(process.stdin, "isTTY");
+  });
+
+  it("undeletes and reports the server success value", async () => {
+    await undeleteNoteAction("abc123");
+    expect(post).toHaveBeenCalledWith("/notes/{noteId}/undelete", {
+      params: { path: { noteId: "abc123" } },
+    });
+    expect(writeJsonMock).toHaveBeenCalledWith({ restored: true, noteId: "abc123", success: true });
+  });
+
+  it("maps a delete 404 to exit code 3", async () => {
+    del.mockResolvedValue({
+      data: undefined,
+      error: {},
+      response: new Response(null, { status: 404 }),
+    });
+    await expect(deleteNoteAction("abc123", { yes: true })).rejects.toMatchObject({ exitCode: 3 });
   });
 });
